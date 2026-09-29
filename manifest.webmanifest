@@ -1,0 +1,14 @@
+{
+  "name": "星界覇王 - STELLAR DOMINION",
+  "short_name": "星界覇王",
+  "description": "スマホ向け本格インクリメンタル・ストラテジー",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#030912",
+  "theme_color": "#07111f",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

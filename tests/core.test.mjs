@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   createInitialState, normalizeState, productionPerSecond, buildingCost,
   upgradeBuilding, recruitUnit, fleetPower, targetTerritory, battlePreview,
-  resolveBattle, tick, surge, missionList, claimMission, canPrestige, prestige
+  resolveBattle, tick, surge, missionList, claimMission, canPrestige, prestige, compactNumber, formatCost
 } from "../js/game-core.js";
 
 test("initial state is playable and produces resources", () => {
@@ -99,4 +99,44 @@ test("normalization repairs missing nested fields", () => {
   assert.equal(state.resources.credits, 9);
   assert.ok("alloy" in state.resources);
   assert.ok("guardian" in state.units);
+});
+
+
+test("tick clamps elapsed time to the existing 8-hour window", () => {
+  const state = createInitialState();
+  const capped = tick(state, 12 * 3600);
+  assert.equal(capped.seconds, 8 * 3600);
+
+  const before = structuredClone(state.resources);
+  const negative = tick(state, -30);
+  assert.equal(negative.seconds, 0);
+  assert.deepEqual(state.resources, before);
+});
+
+test("battle rejects invalid and out-of-route targets before rolling", () => {
+  const state = createInitialState();
+  const shouldNotRoll = () => { throw new Error("random should not be called"); };
+  assert.deepEqual(resolveBattle(state, "missing", shouldNotRoll), { ok: false, reason: "invalid" });
+  assert.deepEqual(resolveBattle(state, "t2", shouldNotRoll), { ok: false, reason: "route" });
+});
+
+test("normalization preserves conquered ordering while filtering invalid ids", () => {
+  const state = normalizeState({
+    conquered: ["t1", "invalid", "t1"],
+    achievements: ["first-up", "first-up"],
+    missionClaims: ["m-build-12", "m-build-12"],
+  });
+  assert.deepEqual(state.conquered, ["t1", "t1"]);
+  assert.deepEqual(state.achievements, ["first-up"]);
+  assert.deepEqual(state.missionClaims, ["m-build-12"]);
+});
+
+test("compact formatting keeps the existing display thresholds", () => {
+  assert.equal(compactNumber(Infinity), "0");
+  assert.equal(compactNumber(999), "999");
+  assert.equal(compactNumber(1000), "1.00K");
+  assert.equal(compactNumber(10000), "10.0K");
+  assert.equal(compactNumber(100000), "100K");
+  assert.equal(compactNumber(12.34), "12.3");
+  assert.equal(formatCost({ credits: 1000, alloy: 25 }), "◈1.00K ⬢25.0");
 });

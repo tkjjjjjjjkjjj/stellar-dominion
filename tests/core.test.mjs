@@ -140,3 +140,24 @@ test("compact formatting keeps the existing display thresholds", () => {
   assert.equal(compactNumber(12.34), "12.3");
   assert.equal(formatCost({ credits: 1000, alloy: 25 }), "◈1.00K ⬢25.0");
 });
+
+
+test("prestige can be repeated across multiple cycles", () => {
+  const state = createInitialState();
+
+  state.buildings.command = 7;
+  state.conquered = ["t1","t2","t3","t4","t5"];
+  const first = prestige(state, 1000);
+  assert.equal(first.ok, true);
+  assert.equal(state.prestige.count, 1);
+  const starsAfterFirst = state.prestige.stars;
+
+  state.buildings.command = 7;
+  state.conquered = ["t1","t2","t3","t4","t5"];
+  const second = prestige(state, 2000);
+  assert.equal(second.ok, true);
+  assert.equal(state.prestige.count, 2);
+  assert.ok(state.prestige.stars > starsAfterFirst);
+  assert.equal(state.conquered.length, 0);
+  assert.equal(state.buildings.command, 1);
+});

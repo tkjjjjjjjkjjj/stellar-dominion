@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  createInitialState, normalizeState, productionPerSecond, buildingCost,
+  TERRITORIES, createInitialState, normalizeState, productionPerSecond, buildingCost,
   upgradeBuilding, recruitUnit, fleetPower, targetTerritory, battlePreview,
   resolveBattle, tick, surge, missionList, claimMission, canPrestige, prestige, compactNumber, formatCost
 } from "../js/game-core.js";
@@ -170,4 +170,13 @@ test("initial passive production is halved", () => {
   assert.equal(rates.alloy, 2.25);
   assert.equal(rates.energy, 2.6);
   assert.equal(rates.intel, 0);
+});
+
+
+test("late conquest enemies scale up sharply", () => {
+  assert.deepEqual(TERRITORIES.map(t => t.power), [90, 165, 320, 560, 950, 1600]);
+  for (let i = 1; i < TERRITORIES.length; i += 1) {
+    assert.ok(TERRITORIES[i].power > TERRITORIES[i - 1].power);
+  }
+  assert.ok(TERRITORIES[5].power / TERRITORIES[2].power >= 5);
 });

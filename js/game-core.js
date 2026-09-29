@@ -124,6 +124,18 @@ const DEFAULT_STATE = {
   settings: { sound: true, reducedMotion: false },
 };
 
+const MAX_TICK_SECONDS = 8 * 3600;
+const AFFORD_EPSILON = 1e-9;
+const PREFERRED_UNIT_BY_TERRITORY_TYPE = {
+  mining: "striker",
+  energy: "striker",
+  trade: "guardian",
+  intel: "guardian",
+};
+const COMPACT_NUMBER_UNITS = [
+  [1e15, "Q"], [1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"],
+];
+
 export function createInitialState(now = Date.now()) {
   return structuredClone({ ...DEFAULT_STATE, createdAt: now, lastSeenAt: now });
 }
@@ -180,7 +192,20 @@ export function unitCost(state, key, count = 1) {
 }
 
 export function canAfford(state, cost) {
-  return Object.entries(cost).every(([key, value]) => (state.resources[key] || 0) + 1e-9 >= value);
+  return Object.entries(cost).every(([key, value]) => (state.resources[key] || 0) + AFFORD_EPSILON >= value);
+}
+
+function scaleResources(values, multiplier) {
+  return Object.fromEntries(RESOURCE_KEYS.map(key => [key, values[key] * multiplier]));
+}
+
+function grantResources(state, amounts) {
+  let total = 0;
+  for (const [key, value] of Object.entries(amounts)) {
+    state.resources[key] += value;
+    total += value;
+  }
+  return total;
 }
 
 export function spend(state, cost) {
@@ -223,14 +248,9 @@ export function productionPerSecond(state) {
 }
 
 export function tick(state, seconds) {
-  const dt = Math.max(0, Math.min(seconds, 8 * 3600));
+  const dt = Math.max(0, Math.min(seconds, MAX_TICK_SECONDS));
   const rates = productionPerSecond(state);
-  let produced = 0;
-  for (const key of RESOURCE_KEYS) {
-    const gain = rates[key] * dt;
-    state.resources[key] += gain;
-    produced += gain;
-  }
+  const produced = grantResources(state, scaleResources(rates, dt));
   state.lifetime.totalProduced += produced;
   return { rates, produced, seconds: dt };
 }
@@ -266,10 +286,31 @@ export function targetTerritory(state) {
 }
 
 function compositionEdge(state, target) {
-  const total = Object.values(state.units).reduce((a, b) => a + b, 0) || 1;
-  const ratios = Object.fromEntries(Object.entries(state.units).map(([k, v]) => [k, v / total]));
-  const preferred = target.type === "mining" || target.type === "energy" ? "striker" : target.type === "trade" || target.type === "intel" ? "guardian" : "siege";
-  return 1 + Math.min(0.18, (ratios[preferred] || 0) * 0.24);
+  const total = Object.values(state.units).reduce((sum, count) => sum + count, 0) || 1;
+  const preferred = PREFERRED_UNIT_BY_TERRITORY_TYPE[target.type] || "siege";
+  const preferredRatio = (state.units[preferred] || 0) / total;
+  return 1 + Math.min(0.18, preferredRatio * 0.24);
+}
+
+function applyBattleVictory(state, territory) {
+  state.conquered.push(territory.id);
+  state.battle.streak += 1;
+  state.battle.victories += 1;
+  grantResources(state, territory.reward);
+  state.prestige.bestTerritories = Math.max(state.prestige.bestTerritories, state.conquered.length);
+}
+
+function applyBattleDefeat(state, preview) {
+  state.battle.streak = 0;
+  state.battle.losses += 1;
+  const lossRate = Math.max(0.04, Math.min(0.14, 0.11 - preview.winChance * 0.05));
+  const casualties = {};
+  for (const key of Object.keys(state.units)) {
+    const loss = Math.min(state.units[key], Math.floor(state.units[key] * lossRate));
+    state.units[key] -= loss;
+    casualties[key] = loss;
+  }
+  return casualties;
 }
 
 export function battlePreview(state, territory = targetTerritory(state)) {
@@ -285,43 +326,27 @@ export function battlePreview(state, territory = targetTerritory(state)) {
 export function resolveBattle(state, territoryId, random = Math.random) {
   const territory = TERRITORIES.find(t => t.id === territoryId);
   if (!territory || state.conquered.includes(territoryId)) return { ok: false, reason: "invalid" };
+
   const expected = targetTerritory(state);
   if (!expected || expected.id !== territoryId) return { ok: false, reason: "route" };
+
   const preview = battlePreview(state, territory);
   const roll = random();
   const win = roll < preview.winChance;
   if (win) {
-    state.conquered.push(territoryId);
-    state.battle.streak += 1;
-    state.battle.victories += 1;
-    for (const [key, amount] of Object.entries(territory.reward)) state.resources[key] += amount;
-    state.prestige.bestTerritories = Math.max(state.prestige.bestTerritories, state.conquered.length);
+    applyBattleVictory(state, territory);
     return { ok: true, win: true, roll, preview, territory, reward: territory.reward };
   }
-  state.battle.streak = 0;
-  state.battle.losses += 1;
-  const lossRate = Math.max(0.04, Math.min(0.14, 0.11 - preview.winChance * 0.05));
-  const casualties = {};
-  for (const key of Object.keys(state.units)) {
-    const loss = Math.min(state.units[key], Math.floor(state.units[key] * lossRate));
-    state.units[key] -= loss;
-    casualties[key] = loss;
-  }
+
+  const casualties = applyBattleDefeat(state, preview);
   return { ok: true, win: false, roll, preview, territory, casualties };
 }
 
 export function surge(state) {
   const rates = productionPerSecond(state);
   const multiplier = 28 + state.buildings.command * 2;
-  const gains = {};
-  let total = 0;
-  for (const key of RESOURCE_KEYS) {
-    const gain = rates[key] * multiplier;
-    state.resources[key] += gain;
-    gains[key] = gain;
-    total += gain;
-  }
-  state.lifetime.totalProduced += total;
+  const gains = scaleResources(rates, multiplier);
+  state.lifetime.totalProduced += grantResources(state, gains);
   state.lifetime.totalTaps += 1;
   return gains;
 }
@@ -339,7 +364,7 @@ export function claimMission(state, missionId) {
   const mission = missionList(state).find(m => m.id === missionId);
   if (!mission || mission.progress < mission.goal || state.missionClaims.includes(missionId)) return { ok: false };
   state.missionClaims.push(missionId);
-  for (const [key, value] of Object.entries(mission.reward)) state.resources[key] += value;
+  grantResources(state, mission.reward);
   return { ok: true, mission };
 }
 
@@ -384,14 +409,21 @@ export function prestige(state, now = Date.now()) {
   return { ok: true, earned };
 }
 
+function compactDecimals(absValue, unit) {
+  if (absValue >= unit * 100) return 0;
+  if (absValue >= unit * 10) return 1;
+  return 2;
+}
+
 export function compactNumber(value) {
   if (!Number.isFinite(value)) return "0";
   const abs = Math.abs(value);
-  const units = [
-    [1e15, "Q"], [1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"],
-  ];
-  for (const [n, suffix] of units) if (abs >= n) return `${(value / n).toFixed(abs >= n * 100 ? 0 : abs >= n * 10 ? 1 : 2)}${suffix}`;
-  return value >= 100 ? Math.floor(value).toLocaleString("ja-JP") : value.toFixed(value >= 10 ? 1 : 2).replace(/\.00$/, "");
+  for (const [unit, suffix] of COMPACT_NUMBER_UNITS) {
+    if (abs >= unit) return `${(value / unit).toFixed(compactDecimals(abs, unit))}${suffix}`;
+  }
+  return value >= 100
+    ? Math.floor(value).toLocaleString("ja-JP")
+    : value.toFixed(value >= 10 ? 1 : 2).replace(/\.00$/, "");
 }
 
 export function formatCost(cost) {

@@ -125,6 +125,7 @@ const DEFAULT_STATE = {
 };
 
 const MAX_TICK_SECONDS = 8 * 3600;
+const PRODUCTION_RATE_SCALE = 0.5;
 const AFFORD_EPSILON = 1e-9;
 const PREFERRED_UNIT_BY_TERRITORY_TYPE = {
   mining: "striker",
@@ -244,7 +245,7 @@ export function productionPerSecond(state) {
   }
   raw.credits += state.buildings.market * state.conquered.length * 1.8;
   const mult = productionMultipliers(state);
-  return Object.fromEntries(RESOURCE_KEYS.map(k => [k, raw[k] * mult[k]]));
+  return Object.fromEntries(RESOURCE_KEYS.map(k => [k, raw[k] * mult[k] * PRODUCTION_RATE_SCALE]));
 }
 
 export function tick(state, seconds) {

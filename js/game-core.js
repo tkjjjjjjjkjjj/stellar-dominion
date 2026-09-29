@@ -94,10 +94,10 @@ export const UNITS = {
 export const TERRITORIES = [
   { id: "t1", name: "灰色衛星帯", type: "mining", enemy: "漂流海賊", power: 90, reward: { credits: 500, alloy: 240 }, bonus: { alloy: 0.12 }, x: 18, y: 67 },
   { id: "t2", name: "黎明コロニー", type: "trade", enemy: "辺境同盟", power: 165, reward: { credits: 900, energy: 340 }, bonus: { credits: 0.14 }, x: 35, y: 35 },
-  { id: "t3", name: "青晶星雲", type: "energy", enemy: "星雲群体", power: 270, reward: { energy: 1100, intel: 90 }, bonus: { energy: 0.16 }, x: 55, y: 72 },
-  { id: "t4", name: "断層ステーション", type: "intel", enemy: "無人防衛網", power: 430, reward: { credits: 1800, intel: 170 }, bonus: { intel: 0.18 }, x: 69, y: 42 },
-  { id: "t5", name: "王冠ゲート", type: "fortress", enemy: "王冠艦隊", power: 680, reward: { credits: 4200, alloy: 1800, intel: 350 }, bonus: { all: 0.12 }, x: 84, y: 69 },
-  { id: "t6", name: "ゼロポイント核", type: "boss", enemy: "虚空統制体", power: 1050, reward: { credits: 9000, energy: 4200, intel: 800 }, bonus: { all: 0.18 }, x: 91, y: 27 },
+  { id: "t3", name: "青晶星雲", type: "energy", enemy: "星雲群体", power: 320, reward: { energy: 1100, intel: 90 }, bonus: { energy: 0.16 }, x: 55, y: 72 },
+  { id: "t4", name: "断層ステーション", type: "intel", enemy: "無人防衛網", power: 560, reward: { credits: 1800, intel: 170 }, bonus: { intel: 0.18 }, x: 69, y: 42 },
+  { id: "t5", name: "王冠ゲート", type: "fortress", enemy: "王冠艦隊", power: 950, reward: { credits: 4200, alloy: 1800, intel: 350 }, bonus: { all: 0.12 }, x: 84, y: 69 },
+  { id: "t6", name: "ゼロポイント核", type: "boss", enemy: "虚空統制体", power: 1600, reward: { credits: 9000, energy: 4200, intel: 800 }, bonus: { all: 0.18 }, x: 91, y: 27 },
 ];
 
 const ACHIEVEMENTS = [

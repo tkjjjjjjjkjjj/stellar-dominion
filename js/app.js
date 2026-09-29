@@ -16,6 +16,7 @@ let lastFrame = performance.now();
 let lastRender = 0;
 let lastSave = 0;
 let audioCtx = null;
+let prestigeInProgress = false;
 
 function loadState() {
   try {
@@ -176,7 +177,7 @@ function renderGoals() {
   const stars = Math.max(4, availablePrestigeStars(state));
   $("#prestigeCard").innerHTML = `<h3>銀河超越</h3><p>基地・艦隊・征服状況をリセットし、恒久ボーナスの<strong>覇王星</strong>を獲得。星1個ごとに資源生産+8%、艦隊戦力+3.5%。</p>
     <div class="prestige-stats"><div class="prestige-stat"><b>${state.prestige.count}</b><small>超越回数</small></div><div class="prestige-stat"><b>${state.prestige.bestTerritories}/6</b><small>最高制圧</small></div><div class="prestige-stat"><b>+${stars}</b><small>次回獲得</small></div></div>
-    <button class="prestige-btn" ${ready ? "" : "disabled"}>${ready ? `超越して ★${stars} 獲得` : "王冠ゲートまで制圧 + 司令Lv7で解禁"}</button>`;
+    <button class="prestige-btn" data-prestige-open ${ready ? "" : "disabled"}>${ready ? `超越して ★${stars} 獲得` : "王冠ゲートまで制圧 + 司令Lv7で解禁"}</button>`;
 }
 
 function renderAll() {
@@ -204,7 +205,40 @@ function switchPanel(name) {
   sound("tap");
 }
 
+function openPrestigeModal() {
+  if (prestigeInProgress || !canPrestige(state)) return;
+  showModal(`<h2>銀河超越を実行？</h2><p>基地・資源・艦隊・征服状況は初期化されます。実績と覇王星は保持され、次周はより高速に成長します。</p><button id="confirmPrestige" class="prestige-btn" data-prestige-confirm>超越を確定</button>`);
+}
+
+function confirmPrestige() {
+  if (prestigeInProgress || !canPrestige(state)) return;
+
+  prestigeInProgress = true;
+  const confirmButton = $("#confirmPrestige");
+  if (confirmButton) confirmButton.disabled = true;
+
+  const result = prestige(state);
+  if (!result.ok) {
+    prestigeInProgress = false;
+    return;
+  }
+
+  closeModal();
+  burst(innerWidth * .5, innerHeight * .5, 80, "purple");
+  sound("win");
+  toast(`超越成功！ 覇王星 +${result.earned}`);
+  saveState();
+  renderAll();
+  switchPanel("base");
+  prestigeInProgress = false;
+}
 function handleClick(e) {
+  const prestigeConfirm = e.target.closest("[data-prestige-confirm]");
+  if (prestigeConfirm) { confirmPrestige(); return; }
+
+  const prestigeOpen = e.target.closest("[data-prestige-open]");
+  if (prestigeOpen) { openPrestigeModal(); return; }
+
   const building = e.target.closest("[data-building]");
   if (building) {
     const key = building.dataset.building;
@@ -259,12 +293,6 @@ function setupEvents() {
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveState(); else { const now=Date.now(); const sec=(now-state.lastSeenAt)/1000; if(sec>3){tick(state,sec);toast(`${formatDuration(sec)}ぶん生産！`);renderAll();} state.lastSeenAt=now; } });
   window.addEventListener("beforeunload", saveState);
   window.addEventListener("resize", resizeCanvas);
-  document.addEventListener("click", e => {
-    if (e.target.closest(".prestige-btn") && canPrestige(state)) {
-      showModal(`<h2>銀河超越を実行？</h2><p>基地・資源・艦隊・征服状況は初期化されます。実績と覇王星は保持され、次周はより高速に成長します。</p><button id="confirmPrestige" class="prestige-btn">超越を確定</button>`);
-      requestAnimationFrame(() => $("#confirmPrestige")?.addEventListener("click", () => { const result=prestige(state); if(result.ok){ closeModal(); burst(innerWidth*.5,innerHeight*.5,80,"purple"); sound("win"); toast(`超越成功！ 覇王星 +${result.earned}`); saveState(); renderAll(); switchPanel("base"); } }));
-    }
-  });
 }
 
 const canvas = $("#fxCanvas");

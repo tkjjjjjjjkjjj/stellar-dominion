@@ -161,3 +161,13 @@ test("prestige can be repeated across multiple cycles", () => {
   assert.equal(state.conquered.length, 0);
   assert.equal(state.buildings.command, 1);
 });
+
+
+test("initial passive production is halved", () => {
+  const state = createInitialState();
+  const rates = productionPerSecond(state);
+  assert.equal(rates.credits, 1);
+  assert.equal(rates.alloy, 2.25);
+  assert.equal(rates.energy, 2.6);
+  assert.equal(rates.intel, 0);
+});

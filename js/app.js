@@ -17,6 +17,7 @@ let lastRender = 0;
 let lastSave = 0;
 let audioCtx = null;
 let prestigeInProgress = false;
+let resetInProgress = false;
 
 function loadState() {
   try {
@@ -36,6 +37,7 @@ function loadState() {
 }
 
 function saveState() {
+  if (resetInProgress) return;
   state.lastSeenAt = Date.now();
   localStorage.setItem(SAVE_KEY, JSON.stringify(state));
 }
@@ -119,6 +121,14 @@ function renderBuildings() {
 
 function canAffordCost(cost) { return Object.entries(cost).every(([k, v]) => state.resources[k] >= v); }
 
+function fleetFormation(key, count) {
+  if (count <= 0) return '<div class="fleet-formation empty"><span>待機艦なし</span></div>';
+  const visible = Math.min(count, 9);
+  const ships = Array.from({ length: visible }, () => `<i class="fleet-ship fleet-ship-${key}" aria-hidden="true"></i>`).join("");
+  const overflow = count > visible ? `<b class="fleet-overflow">+${count - visible}</b>` : "";
+  return `<div class="fleet-formation" aria-label="${count}隻">${ships}${overflow}</div>`;
+}
+
 function renderFleet() {
   const power = fleetPower(state);
   $("#fleetPower").textContent = `戦力 ${compactNumber(power)}`;
@@ -129,6 +139,7 @@ function renderFleet() {
     return `<article class="unit-card ${unlocked ? "" : "locked"}">
       <div class="unit-icon">${def.icon}</div><h3>${def.name}</h3><span class="unit-role">${unlocked ? `${def.role} / ${UNITS[def.strongAgainst]?.role || ""}に強い` : `司令Lv${def.unlock?.command}`}</span>
       <b class="unit-count">${count}</b><span class="unit-power">+${def.power} 戦力/隻</span>
+      ${fleetFormation(key, count)}
       <button class="recruit-btn" data-unit="${key}" ${!unlocked || !canAffordCost(cost) ? "disabled" : ""}>+1 建造<small>${formatCost(cost)}</small></button>
     </article>`;
   }).join("");
@@ -205,6 +216,17 @@ function switchPanel(name) {
   sound("tap");
 }
 
+function openResetModal() {
+  showModal(`<h2>最初からやり直す？</h2><p>このゲームのセーブデータだけを削除し、資源・施設・艦隊・征服・実績・超越回数をすべて初期状態に戻します。この操作は元に戻せません。</p><button class="danger-btn" data-reset-confirm>セーブデータを削除して最初から</button>`);
+}
+
+function confirmReset() {
+  if (resetInProgress) return;
+  resetInProgress = true;
+  localStorage.removeItem(SAVE_KEY);
+  location.reload();
+}
+
 function openPrestigeModal() {
   if (prestigeInProgress || !canPrestige(state)) return;
   showModal(`<h2>銀河超越を実行？</h2><p>基地・資源・艦隊・征服状況は初期化されます。実績と覇王星は保持され、次周はより高速に成長します。</p><button id="confirmPrestige" class="prestige-btn" data-prestige-confirm>超越を確定</button>`);
@@ -233,6 +255,12 @@ function confirmPrestige() {
   prestigeInProgress = false;
 }
 function handleClick(e) {
+  const resetConfirm = e.target.closest("[data-reset-confirm]");
+  if (resetConfirm) { confirmReset(); return; }
+
+  const resetOpen = e.target.closest("[data-reset-open]");
+  if (resetOpen) { openResetModal(); return; }
+
   const prestigeConfirm = e.target.closest("[data-prestige-confirm]");
   if (prestigeConfirm) { confirmPrestige(); return; }
 
@@ -287,7 +315,7 @@ function setupEvents() {
     floatGain(`+${compactNumber(Object.values(gains).reduce((a,b)=>a+b,0))}`); renderResources(); renderBuildings(); renderGoals();
   });
   $("#soundBtn").addEventListener("click", () => { state.settings.sound = !state.settings.sound; $("#soundBtn").textContent = state.settings.sound ? "🔊" : "🔇"; saveState(); });
-  $("#helpBtn").addEventListener("click", () => showModal(`<h2>遊び方</h2><p><strong>1. 基地を強化</strong><br>資源は毎秒自動で増加。資源サージも使って序盤を一気に加速。</p><p><strong>2. 艦隊を編成</strong><br>3兵種には得意分野があり、星域ごとに編成比率で実効戦力が上がります。</p><p><strong>3. 星域を順番に征服</strong><br>勝率を見ながら攻めるか、経済に戻って強化するかを判断。連勝中は戦力補正あり。</p><p><strong>4. 超越で周回</strong><br>終盤まで進めると覇王星を獲得してニューゲーム。恒久倍率で次周はさらに高速化。</p><p>進行状況は端末内に自動保存され、最大8時間分のオフライン生産を回収できます。</p>`));
+  $("#helpBtn").addEventListener("click", () => showModal(`<h2>遊び方</h2><p><strong>1. 基地を強化</strong><br>資源は毎秒自動で増加。資源サージも使って序盤を一気に加速。</p><p><strong>2. 艦隊を編成</strong><br>3兵種には得意分野があり、星域ごとに編成比率で実効戦力が上がります。</p><p><strong>3. 星域を順番に征服</strong><br>後半ほど敵戦力が大きく伸びます。勝率を見ながら艦隊を増強して進軍しましょう。</p><p><strong>4. 超越で周回</strong><br>終盤まで進めると覇王星を獲得してニューゲーム。恒久倍率で次周はさらに高速化。</p><p>進行状況は端末内に自動保存され、最大8時間分のオフライン生産を回収できます。</p><hr class="modal-divider"><h3>データ管理</h3><p>完全に最初から遊び直す場合は、下のボタンからこのゲームのセーブだけを削除できます。</p><button class="danger-btn" data-reset-open>最初からやり直す</button>`));
   $("#modalClose").addEventListener("click", closeModal);
   $("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveState(); else { const now=Date.now(); const sec=(now-state.lastSeenAt)/1000; if(sec>3){tick(state,sec);toast(`${formatDuration(sec)}ぶん生産！`);renderAll();} state.lastSeenAt=now; } });

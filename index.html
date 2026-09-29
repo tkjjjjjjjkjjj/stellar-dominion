@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#07111f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="description" content="スマホで遊べる本格インクリメンタル・ストラテジーゲーム" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>星界覇王 - STELLAR DOMINION</title>
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar glass">
+      <div class="brand"><img src="assets/icon.svg" alt="" /><div><strong>星界覇王</strong><small>STELLAR DOMINION</small></div></div>
+      <div class="top-actions"><button id="soundBtn" class="icon-btn" aria-label="サウンド切替">🔊</button><button id="helpBtn" class="icon-btn" aria-label="遊び方">?</button></div>
+    </header>
+    <section id="resources" class="resource-grid" aria-label="資源"></section>
+    <main>
+      <section id="panel-base" class="panel active">
+        <div class="hero-card glass">
+          <div class="hero-copy"><span class="eyebrow">FRONTIER COMMAND</span><h1>帝国を、<br><em>加速</em>させろ。</h1><p>タップで資源サージ。建設と征服で生産速度を雪だるま式に増やせ。</p><button id="surgeBtn" class="surge-btn"><span class="surge-core">⚡</span><span><b>資源サージ</b><small id="surgeValue">+30秒分</small></span></button></div>
+          <img class="hero-art" src="assets/citadel.svg" alt="宇宙要塞のイラスト" />
+          <div id="floatingLayer" class="floating-layer" aria-hidden="true"></div>
+        </div>
+        <div class="section-head"><div><span class="eyebrow">ECONOMY</span><h2>都市建設</h2></div><span id="globalMultiplier" class="pill">×1.00</span></div>
+        <div id="buildingList" class="card-list"></div>
+      </section>
+      <section id="panel-fleet" class="panel">
+        <div class="section-head"><div><span class="eyebrow">ARMADA</span><h2>艦隊編成</h2></div><span id="fleetPower" class="power-chip">戦力 0</span></div>
+        <div class="fleet-banner glass"><img src="assets/fleet.svg" alt="宇宙艦隊のイラスト" /><div><b>兵種相性で実効戦力が変化</b><span>機動 → 火力 → 防衛 → 機動</span></div></div>
+        <div id="unitList" class="unit-grid"></div>
+      </section>
+      <section id="panel-map" class="panel">
+        <div class="section-head"><div><span class="eyebrow">CONQUEST</span><h2>星域征服</h2></div><span id="streakChip" class="pill">連勝 0</span></div>
+        <div id="galaxyMap" class="galaxy-map glass">
+          <div class="stars"></div><svg class="route-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M18 67 L35 35 L55 72 L69 42 L84 69 L91 27" /></svg>
+          <div id="territoryNodes"></div>
+        </div>
+        <div id="battleCard" class="battle-card glass"></div>
+      </section>
+      <section id="panel-goals" class="panel">
+        <div class="section-head"><div><span class="eyebrow">OPERATIONS</span><h2>ミッション</h2></div><span class="pill">恒久報酬あり</span></div>
+        <div id="missionList" class="mission-list"></div>
+        <div class="section-head spaced"><div><span class="eyebrow">LEGACY</span><h2>超越</h2></div><span id="starsChip" class="power-chip">★ 0</span></div>
+        <div id="prestigeCard" class="prestige-card glass"></div>
+      </section>
+    </main>
+    <nav class="bottom-nav glass" aria-label="メインメニュー">
+      <button class="nav-btn active" data-panel="base"><span>⌂</span><small>基地</small></button>
+      <button class="nav-btn" data-panel="fleet"><span>➤</span><small>艦隊</small></button>
+      <button class="nav-btn" data-panel="map"><span>◎</span><small>征服</small><i id="mapBadge" class="badge hidden">!</i></button>
+      <button class="nav-btn" data-panel="goals"><span>★</span><small>任務</small><i id="goalBadge" class="badge hidden">!</i></button>
+    </nav>
+  </div>
+  <div id="toastLayer" class="toast-layer" aria-live="polite"></div>
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="modal-card glass"><button id="modalClose" class="modal-close" aria-label="閉じる">×</button><div id="modalBody"></div></div></div>
+  <canvas id="fxCanvas" class="fx-canvas" aria-hidden="true"></canvas>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

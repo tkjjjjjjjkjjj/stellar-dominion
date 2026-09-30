@@ -102,11 +102,33 @@ function showModal(html) {
 
 function closeModal() { $("#modal").classList.add("hidden"); }
 
+function resourceGlyph(key) {
+  const glyphs = {
+    credits: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 19 7v10l-7 4-7-4V7l7-4Z"/><path d="m9 9 3-2 3 2v6l-3 2-3-2V9Z"/></svg>',
+    alloy: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10l4 8-4 8H7l-4-8 4-8Z"/><path d="M9 8h6l2 4-2 4H9l-2-4 2-4Z"/></svg>',
+    energy: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-7 11h5l-1 9 8-12h-5V2Z"/></svg>',
+    intel: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12 12 3Z"/><circle cx="12" cy="12" r="3"/></svg>',
+  };
+  return glyphs[key] || "";
+}
+
+function facilityGlyph(key) {
+  const glyphs = {
+    command: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 25 9v14l-9 6-9-6V9l9-6Z"/><circle cx="16" cy="16" r="5"/><path d="M16 3v8M7 9l6 4M25 9l-6 4M7 23l6-4M25 23l-6-4M16 29v-8"/></svg>',
+    extractor: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 23h22l-3 5H8l-3-5Z"/><path d="m9 23 3-12h8l3 12"/><path d="M13 11 16 4l3 7M10 17h12"/></svg>',
+    reactor: '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="10"/><circle cx="16" cy="16" r="4"/><path d="M16 2v5M16 25v5M2 16h5M25 16h5M6 6l4 4M22 22l4 4M26 6l-4 4M10 22l-4 4"/></svg>',
+    market: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M6 9h20l-2 5H8L6 9Z"/><path d="M9 14v12h14V14M12 18h8M16 18v8"/></svg>',
+    observatory: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 12c7-8 15-7 19-3-3 5-9 10-18 9"/><path d="m12 18-4 9M18 18l5 9M8 27h18"/><circle cx="22" cy="9" r="2.5"/></svg>',
+    foundry: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 25h22V12l-6 4v-6l-7 5V9L5 14v11Z"/><path d="M10 20h4M18 20h4M16 3v7"/></svg>',
+  };
+  return glyphs[key] || "";
+}
+
 function renderResources() {
   const rates = productionPerSecond(state);
   $("#resources").innerHTML = RESOURCE_KEYS.map(key => `
-    <div class="resource">
-      <span class="resource-top"><b>${RESOURCE_META[key].icon}</b>${RESOURCE_META[key].name}</span>
+    <div class="resource resource-${key}">
+      <span class="resource-top"><b class="resource-glyph">${resourceGlyph(key)}</b>${RESOURCE_META[key].name}</span>
       <span class="resource-value">${compactNumber(state.resources[key])}</span>
       <span class="resource-rate">+${compactNumber(rates[key])}/秒</span>
     </div>`).join("");
@@ -133,7 +155,7 @@ function buildingSceneNode(key, def) {
   const level = state.buildings[key] || 0;
   const selected = selectedCommandTarget.type === "building" && selectedCommandTarget.key === key;
   return `<button class="command-node building-node node-${key} ${unlocked ? "" : "locked"} ${selected ? "selected" : ""}" data-scene-building="${key}" style="left:${x}%;top:${y}%" aria-label="${def.name}">
-    <span class="command-node-icon">${def.icon}</span>
+    <span class="command-node-icon">${facilityGlyph(key)}</span>
     <span class="command-node-name">${def.name}</span>
     <span class="command-node-level">${unlocked ? `Lv.${level}` : "LOCK"}</span>
   </button>`;
@@ -163,7 +185,7 @@ function renderCommandDetail() {
     const cost = unitCost(state, key, 1);
     detail.innerHTML = `<div class="detail-copy">
       <span class="eyebrow">ARMADA</span>
-      <div class="detail-title"><span class="detail-icon">${def.icon}</span><div><h3>${def.name}</h3><small>${def.role} · 保有 ${count}隻 · 1隻 ${def.power}戦力</small></div></div>
+      <div class="detail-title"><span class="detail-icon unit-detail-icon"><i class="${sceneShipClass(key)}"></i></span><div><h3>${def.name}</h3><small>${def.role} · 保有 ${count}隻 · 1隻 ${def.power}戦力</small></div></div>
       <p>${unlocked ? `${UNITS[def.strongAgainst]?.role || ""}タイプに強い艦種。建造するほど基地上の艦影も増えます。` : `司令中枢 Lv${def.unlock?.command} で解禁`}</p>
     </div>
     <button class="detail-action recruit-btn" data-recruit-unit="${key}" ${!unlocked || !canAffordCost(cost) ? "disabled" : ""}>+1 建造<small>${formatCost(cost)}</small></button>`;
@@ -183,7 +205,7 @@ function renderCommandDetail() {
 
   detail.innerHTML = `<div class="detail-copy">
     <span class="eyebrow">FACILITY</span>
-    <div class="detail-title"><span class="detail-icon">${def.icon}</span><div><h3>${def.name}</h3><small>Lv.${level} · ${unlocked ? effect : `司令中枢 Lv${def.unlock?.command} で解禁`}</small></div></div>
+    <div class="detail-title"><span class="detail-icon facility-detail-icon">${facilityGlyph(key)}</span><div><h3>${def.name}</h3><small>Lv.${level} · ${unlocked ? effect : `司令中枢 Lv${def.unlock?.command} で解禁`}</small></div></div>
     <p>${def.description}</p>
   </div>
   <button class="detail-action upgrade-btn" data-upgrade-building="${key}" ${!unlocked || !canAffordCost(cost) ? "disabled" : ""}>強化<small>${formatCost(cost)}</small></button>`;
@@ -202,7 +224,15 @@ function renderCommandScene() {
   renderCommandDetail();
 }
 function nodeIcon(t) {
-  return ({ mining: "⬢", trade: "◈", energy: "⚡", intel: "◆", fortress: "✦", boss: "✹" })[t.type] || "●";
+  const icons = {
+    mining: '<svg viewBox="0 0 24 24"><path d="M7 5h10l4 7-4 7H7l-4-7 4-7Z"/></svg>',
+    trade: '<svg viewBox="0 0 24 24"><path d="M12 3 20 8v8l-8 5-8-5V8l8-5Z"/><path d="M8 12h8M12 8v8"/></svg>',
+    energy: '<svg viewBox="0 0 24 24"><path d="m13 2-7 11h5l-1 9 8-12h-5V2Z"/></svg>',
+    intel: '<svg viewBox="0 0 24 24"><path d="M12 3 20 12 12 21 4 12 12 3Z"/><circle cx="12" cy="12" r="3"/></svg>',
+    fortress: '<svg viewBox="0 0 24 24"><path d="M5 20V8l3 2 4-6 4 6 3-2v12H5Z"/><path d="M9 20v-5h6v5"/></svg>',
+    boss: '<svg viewBox="0 0 24 24"><path d="m12 2 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-6Z"/></svg>',
+  };
+  return icons[t.type] || "";
 }
 
 function renderMap() {
@@ -387,7 +417,12 @@ function setupEvents() {
     const gains = surge(state); sound("upgrade"); haptic(18); burstAt(e.currentTarget, 18);
     floatGain(`+${compactNumber(Object.values(gains).reduce((a,b)=>a+b,0))}`); renderResources(); renderCommandScene(); renderGoals();
   });
-  $("#soundBtn").addEventListener("click", () => { state.settings.sound = !state.settings.sound; $("#soundBtn").textContent = state.settings.sound ? "🔊" : "🔇"; saveState(); });
+  $("#soundBtn").addEventListener("click", () => {
+    state.settings.sound = !state.settings.sound;
+    $("#soundBtn").dataset.muted = state.settings.sound ? "false" : "true";
+    $("#soundBtn").setAttribute("aria-label", state.settings.sound ? "サウンドをオフ" : "サウンドをオン");
+    saveState();
+  });
   $("#helpBtn").addEventListener("click", () => showModal(`<h2>遊び方</h2><p><strong>1. 司令基地を操作</strong><br>基地画面の施設や艦隊を直接タップすると、下に強化・建造パネルが表示されます。資源サージで序盤を加速できます。</p><p><strong>2. 艦隊を増強</strong><br>3兵種には得意分野があり、建造するほど基地上の艦影も増えます。</p><p><strong>3. 星域を順番に征服</strong><br>後半ほど敵戦力が大きく伸びます。勝率を見ながら艦隊を増強して進軍しましょう。</p><p><strong>4. 超越で周回</strong><br>終盤まで進めると覇王星を獲得してニューゲーム。恒久倍率で次周はさらに高速化。</p><p>進行状況は端末内に自動保存され、最大8時間分のオフライン生産を回収できます。</p><hr class="modal-divider"><h3>データ管理</h3><p>完全に最初から遊び直す場合は、下のボタンからこのゲームのセーブだけを削除できます。</p><button class="danger-btn" data-reset-open>最初からやり直す</button>`));
   $("#modalClose").addEventListener("click", closeModal);
   $("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
@@ -417,6 +452,7 @@ function loop(now) {
 }
 
 resizeCanvas(); setupEvents(); renderAll(); drawFx(); requestAnimationFrame(loop);
-$("#soundBtn").textContent = state.settings.sound ? "🔊" : "🔇";
+$("#soundBtn").dataset.muted = state.settings.sound ? "false" : "true";
+$("#soundBtn").setAttribute("aria-label", state.settings.sound ? "サウンドをオフ" : "サウンドをオン");
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(()=>{});
 window.__STELLAR_DOMINION_READY__ = true;

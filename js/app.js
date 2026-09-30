@@ -11,6 +11,7 @@ import { sfx, unlockAudio, setSoundEnabled } from "./audio.js";
 import { initFx, burst, burstAt, flyResources } from "./fx.js";
 
 const SAVE_KEY = "stellar-dominion-save-v1";
+const APP_VERSION = "1.2.1";
 const OFFLINE_CAP = 8 * 3600;
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -613,7 +614,7 @@ function showHelp() {
         <li><b>${icon("map")}星域征服</b><span>勝率を見て出撃。勝つと恒久的な生産ボーナスと報酬を獲得。</span></li>
         <li><b>${icon("galaxy")}銀河超越</b><span>終盤に覇王星を得てニューゲーム。周回ごとに成長が加速。</span></li>
       </ol>
-      <p class="note">進行は端末内に自動保存され、最大8時間分のオフライン生産を回収できます。</p>
+      <p class="note">進行は端末内に自動保存され、最大8時間分のオフライン生産を回収できます。<br>バージョン ${APP_VERSION}</p>
       <div class="settings">
         <button class="setting" data-toggle="sound"><span>${icon("sound")}サウンド</span><i class="switch ${state.settings.sound ? "on" : ""}"></i></button>
         <button class="setting" data-toggle="motion"><span>${icon("galaxy")}演出を減らす</span><i class="switch ${state.settings.reducedMotion ? "on" : ""}"></i></button>
@@ -1062,6 +1063,15 @@ function beginGame() {
   showWelcome();
 }
 
+// Keep installed copies (notably iOS home-screen apps, which rarely do a full reload) on the latest deploy:
+// check for a new worker on launch and on every resume; the worker reloads open pages when it replaces an old version.
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator) || !location.protocol.startsWith("http")) return;
+  navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then(reg => {
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update().catch(() => {}); });
+  }).catch(() => {});
+}
+
 function boot() {
   const firstVisit = !hasSave();
   state = loadState();
@@ -1082,7 +1092,7 @@ function boot() {
     setTimeout(() => splash.remove(), 600);
     if (!firstVisit) beginGame();
   }, reducedMotion() ? 0 : 450);
-  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(() => {});
+  registerServiceWorker();
   window.__STELLAR_DOMINION_READY__ = true;
 }
 

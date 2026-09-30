@@ -35,6 +35,8 @@ body {
   user-select: none;
   -webkit-touch-callout: none;
   text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 button { font: inherit; color: inherit; touch-action: manipulation; cursor: pointer; -webkit-user-select: none; user-select: none; }
 svg { display: block; }

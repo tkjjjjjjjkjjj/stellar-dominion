@@ -2,7 +2,7 @@ import {
   RESOURCE_KEYS, RESOURCE_META, BUILDINGS, UNITS, TERRITORIES,
   createInitialState, normalizeState, productionPerSecond, productionMultipliers,
   buildingCost, unitCost, isUnlocked, upgradeBuilding, recruitUnit, fleetPower,
-  targetTerritory, battlePreview, resolveBattle, surge, missionList, claimMission,
+  targetTerritory, battlePreview, resolveBattle, enemyPower, enemyScale, ENEMY_SCALE_PER_PRESTIGE, surge, missionList, claimMission,
   checkAchievements, availablePrestigeStars, canPrestige, prestige, tick,
   compactNumber
 } from "./game-core.js";
@@ -363,7 +363,7 @@ const HOME = [6, 94];
 
 function renderMap() {
   const target = targetTerritory(state);
-  const key = `${state.conquered.join(",")}|${target?.id || ""}`;
+  const key = `${state.conquered.join(",")}|${target?.id || ""}|${state.prestige.count}`;
   if (key !== mapKey) {
     mapKey = key;
     const points = [HOME, ...TERRITORIES.map(mapPos)];
@@ -388,13 +388,16 @@ function renderMap() {
           ${done ? `<span class="planet-flag">${icon("flag")}</span>` : ""}
           ${status === "locked" ? `<span class="planet-lock">${icon("lock")}</span>` : ""}
         </span>
-        <span class="planet-label"><b>${t.name}</b><small>${done ? "制圧済" : `敵戦力 ${fmtInt(t.power)}`}</small></span>
+        <span class="planet-label"><b>${t.name}</b><small>${done ? "制圧済" : `敵戦力 ${fmtInt(enemyPower(state, t))}`}</small></span>
         <span class="planet-index">${i + 1}</span>
       </button>`;
     }).join("");
   }
   setText($("#stageChip"), `STAGE ${Math.min(TERRITORIES.length, state.conquered.length + 1)}/${TERRITORIES.length}`);
   setHTML($("#streakChip"), `${icon("trend")}連勝 <b>${state.battle.streak}</b>`);
+  const threat = Math.round((enemyScale(state) - 1) * 100);
+  setClass($("#threatChip"), "hidden", threat <= 0);
+  setHTML($("#threatChip"), `${icon("skull")}敵戦力 <b>+${threat}%</b>`);
   renderBattleCard(target);
 }
 
@@ -404,7 +407,7 @@ function bonusText(bonus) {
 
 function renderBattleCard(target) {
   const card = $("#battleCard");
-  const key = target?.id || "none";
+  const key = `${target?.id || "none"}|${state.prestige.count}`;
   if (key !== battleKey) {
     battleKey = key;
     if (!target) {
@@ -428,7 +431,7 @@ function renderBattleCard(target) {
       <div class="versus">
         <div class="vs-side own"><small>自軍 実効戦力</small><b data-b="own">0</b></div>
         <div class="vs-bar"><i class="vs-own" data-b="bar"></i><span class="vs-mark">VS</span></div>
-        <div class="vs-side enemy"><small>敵戦力</small><b>${fmtInt(target.power)}</b></div>
+        <div class="vs-side enemy"><small>敵戦力</small><b>${fmtInt(enemyPower(state, target))}</b></div>
       </div>
       <div class="battle-foot">
         <div class="reward-box"><small>制圧報酬</small><div class="reward-list">${rewardChips(target.reward)}</div></div>
@@ -444,7 +447,7 @@ function renderBattleCard(target) {
   const tone = pct < 40 ? "bad" : pct < 65 ? "mid" : "good";
   refs.battle.odds.dataset.tone = tone;
   refs.battle.ring.style.strokeDashoffset = String(169.6 * (1 - preview.winChance));
-  refs.battle.bar.style.width = `${Math.max(6, Math.min(94, preview.effective / (preview.effective + target.power) * 100))}%`;
+  refs.battle.bar.style.width = `${Math.max(6, Math.min(94, preview.effective / (preview.effective + preview.enemy) * 100))}%`;
 }
 
 // ---------------------------------------------------------------- goals
@@ -466,7 +469,7 @@ function buildGoals() {
   $("#prestigeCard").innerHTML = `
     <div class="galaxy" aria-hidden="true"><i></i><i></i><b></b></div>
     <div class="prestige-copy">
-      <p>基地・艦隊・征服状況をリセットし、恒久ボーナスの<strong>覇王星</strong>を獲得。星1個ごとに資源生産 <strong>+8%</strong>、艦隊戦力 <strong>+3.5%</strong>。</p>
+      <p>基地・艦隊・征服状況をリセットし、恒久ボーナスの<strong>覇王星</strong>を獲得。星1個ごとに資源生産 <strong>+8%</strong>、艦隊戦力 <strong>+3.5%</strong>。ただし超越のたびに<em>敵戦力も +${Math.round(ENEMY_SCALE_PER_PRESTIGE * 100)}%</em>。</p>
     </div>
     <div class="prestige-stats">
       <div><b data-p="count">0</b><small>超越回数</small></div>
@@ -634,7 +637,7 @@ let prestigeInProgress = false;
 function openPrestigeModal() {
   if (prestigeInProgress || !canPrestige(state)) return;
   const stars = Math.max(4, availablePrestigeStars(state));
-  showModal(`<div class="confirm"><div class="galaxy small" aria-hidden="true"><i></i><i></i><b></b></div><span class="kicker">ASCENSION</span><h2>銀河超越を実行？</h2><p>基地・資源・艦隊・征服状況は初期化されます。実績と覇王星は保持され、次周はより高速に成長します。</p><div class="ascend-gain">${starIcon()}<b>+${stars}</b><small>覇王星</small></div><div class="confirm-row"><button class="btn btn-ghost" data-close-modal><span class="btn-main">やめる</span></button><button id="confirmPrestige" class="btn btn-purple" data-prestige-confirm><span class="btn-main">超越を確定</span></button></div></div>`, "center");
+  showModal(`<div class="confirm"><div class="galaxy small" aria-hidden="true"><i></i><i></i><b></b></div><span class="kicker">ASCENSION</span><h2>銀河超越を実行？</h2><p>基地・資源・艦隊・征服状況は初期化されます。実績と覇王星は保持され、次周はより高速に成長します。</p><p class="threat-note">${icon("skull")}次の銀河では敵戦力 <b>+${Math.round((enemyScale(state) - 1 + ENEMY_SCALE_PER_PRESTIGE) * 100)}%</b>（現在 +${Math.round((enemyScale(state) - 1) * 100)}%）</p><div class="ascend-gain">${starIcon()}<b>+${stars}</b><small>覇王星</small></div><div class="confirm-row"><button class="btn btn-ghost" data-close-modal><span class="btn-main">やめる</span></button><button id="confirmPrestige" class="btn btn-purple" data-prestige-confirm><span class="btn-main">超越を確定</span></button></div></div>`, "center");
 }
 
 function confirmPrestige() {

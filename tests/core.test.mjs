@@ -189,3 +189,32 @@ test("service worker precaches files that exist", async () => {
     assert.ok(existsSync(new URL(`../${path.slice(2)}`, import.meta.url)), `missing ${path}`);
   }
 });
+
+test("enemies grow a little stronger with each ascension", async () => {
+  const { enemyPower, ENEMY_SCALE_PER_PRESTIGE } = await import("../js/game-core.js");
+  const state = createInitialState();
+  state.units.striker = 12;
+  const t1 = TERRITORIES[0];
+  assert.equal(enemyPower(state, t1), t1.power);
+  const before = battlePreview(state, t1);
+  assert.equal(before.enemy, t1.power);
+
+  state.prestige.count = 1;
+  assert.equal(enemyPower(state, t1), Math.round(t1.power * (1 + ENEMY_SCALE_PER_PRESTIGE)));
+  const after = battlePreview(state, t1);
+  assert.equal(after.enemy, enemyPower(state, t1));
+  assert.ok(after.winChance < before.winChance);
+
+  // linear, not compounding: ten ascensions double enemy power
+  state.prestige.count = 10;
+  assert.equal(enemyPower(state, TERRITORIES[5]), TERRITORIES[5].power * 2);
+});
+
+test("ascension raises the enemy scale for the next galaxy", () => {
+  const state = createInitialState();
+  state.buildings.command = 7;
+  state.conquered = ["t1", "t2", "t3", "t4", "t5"];
+  const before = battlePreview(state, TERRITORIES[0]).enemy;
+  prestige(state, 1000);
+  assert.ok(battlePreview(state, TERRITORIES[0]).enemy > before);
+});

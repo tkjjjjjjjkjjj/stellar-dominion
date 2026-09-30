@@ -126,6 +126,8 @@ const DEFAULT_STATE = {
 
 const MAX_TICK_SECONDS = 8 * 3600;
 const PRODUCTION_RATE_SCALE = 0.5;
+// Each ascension makes every enemy a little tougher (linear, so later laps stay winnable).
+export const ENEMY_SCALE_PER_PRESTIGE = 0.1;
 const AFFORD_EPSILON = 1e-9;
 const PREFERRED_UNIT_BY_TERRITORY_TYPE = {
   mining: "striker",
@@ -314,14 +316,23 @@ function applyBattleDefeat(state, preview) {
   return casualties;
 }
 
+export function enemyScale(state) {
+  return 1 + (state.prestige?.count || 0) * ENEMY_SCALE_PER_PRESTIGE;
+}
+
+export function enemyPower(state, territory) {
+  return Math.round(territory.power * enemyScale(state));
+}
+
 export function battlePreview(state, territory = targetTerritory(state)) {
   if (!territory) return null;
   const own = fleetPower(state);
+  const enemy = enemyPower(state, territory);
   const streakBoost = 1 + Math.min(0.15, state.battle.streak * 0.025);
   const effective = own * compositionEdge(state, territory) * streakBoost;
-  const ratio = effective / territory.power;
+  const ratio = effective / enemy;
   const winChance = Math.max(0.12, Math.min(0.92, 0.5 + Math.log(Math.max(0.01, ratio)) * 0.3));
-  return { own, enemy: territory.power, effective: Math.round(effective), winChance };
+  return { own, enemy, effective: Math.round(effective), winChance };
 }
 
 export function resolveBattle(state, territoryId, random = Math.random) {

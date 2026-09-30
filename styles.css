@@ -371,6 +371,12 @@ h2, h3 { font-family: var(--font-head); font-weight: 800; margin: 0; letter-spac
 }
 .chip b { color: var(--gold); font-size: 13px; }
 .chip .ico { font-size: 13px; color: var(--gold); }
+.chip-threat { color: #ffb3bf; border-color: rgba(255, 77, 106, .45); background: rgba(40, 6, 16, .85); }
+.chip-threat b, .chip-threat .ico { color: var(--red); }
+.prestige-copy em { font-style: normal; font-weight: 800; color: #ff8fa1; }
+.modal-card p.threat-note { display: inline-flex; align-items: center; gap: 6px; margin: -4px 0 14px; padding: 5px 12px; border-radius: 999px; font-size: 12px; line-height: 1.4; color: #ffb3bf; background: rgba(255, 77, 106, .1); border: 1px solid rgba(255, 77, 106, .3); }
+.modal-card p.threat-note b { color: var(--red); }
+.threat-note .ico { font-size: 14px; color: var(--red); }
 
 /* ------------------------------------------------------------ map */
 .map-scene {

@@ -1,4 +1,4 @@
-const CACHE = "stellar-dominion-v8";
+const CACHE = "stellar-dominion-v9";
 const ASSETS = [
   "./", "./index.html", "./styles.css", "./manifest.webmanifest",
   "./js/app.js", "./js/game-core.js", "./js/art.js", "./js/audio.js", "./js/fx.js",

@@ -15,8 +15,15 @@
 <body>
   <div id="app" class="app-shell">
     <header class="topbar glass">
-      <div class="brand"><img src="assets/icon.svg" alt="" /><div><strong>星界覇王</strong><small>STELLAR DOMINION</small></div></div>
-      <div class="top-actions"><button id="soundBtn" class="icon-btn" aria-label="サウンド切替">🔊</button><button id="helpBtn" class="icon-btn" aria-label="遊び方">?</button></div>
+      <div class="brand"><img src="assets/icon.svg" alt="" /><div><strong>星界覇王</strong><small>STELLAR DOMINION</small></div><span class="system-status"><i></i>ONLINE</span></div>
+      <div class="top-actions">
+        <button id="soundBtn" class="icon-btn" aria-label="サウンド切替">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4h4l5 4V6L9 10H5Z"/><path class="sound-wave" d="M17 9c1.5 1.7 1.5 4.3 0 6M19.5 6.5c3 3.1 3 7.9 0 11"/><path class="sound-muted" d="m17 9 5 6M22 9l-5 6"/></svg>
+        </button>
+        <button id="helpBtn" class="icon-btn" aria-label="遊び方">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M9.8 9a2.5 2.5 0 0 1 4.7 1.1c0 2-2.5 2.3-2.5 4M12 17.2v.1"/></svg>
+        </button>
+      </div>
     </header>
     <section id="resources" class="resource-grid" aria-label="資源"></section>
     <main>
@@ -27,8 +34,13 @@
         </div>
         <div class="command-scene glass">
           <div class="command-stars" aria-hidden="true"></div>
+          <div class="command-vignette" aria-hidden="true"></div>
           <div class="command-orbit orbit-a" aria-hidden="true"></div>
           <div class="command-orbit orbit-b" aria-hidden="true"></div>
+          <svg class="command-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M50 39 L20 25 M50 39 L79 24 M50 39 L18 66 M50 39 L80 65 M50 39 L50 78"/>
+            <circle cx="50" cy="39" r="17"/>
+          </svg>
           <div id="commandScene" class="command-scene-layer" aria-label="司令基地の施設と艦隊"></div>
           <button id="surgeBtn" class="scene-surge" aria-label="資源サージ">
             <span class="surge-core">⚡</span>
@@ -54,9 +66,9 @@
       </section>
     </main>
     <nav class="bottom-nav glass" aria-label="メインメニュー">
-      <button class="nav-btn active" data-panel="base"><span>⌂</span><small>司令基地</small></button>
-      <button class="nav-btn" data-panel="map"><span>◎</span><small>征服</small><i id="mapBadge" class="badge hidden">!</i></button>
-      <button class="nav-btn" data-panel="goals"><span>★</span><small>任務</small><i id="goalBadge" class="badge hidden">!</i></button>
+      <button class="nav-btn active" data-panel="base"><span><svg viewBox="0 0 24 24"><path d="M4 20V9l8-5 8 5v11H4Z"/><path d="M9 20v-6h6v6M8 10h8"/></svg></span><small>司令基地</small></button>
+      <button class="nav-btn" data-panel="map"><span><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></span><small>征服</small><i id="mapBadge" class="badge hidden">!</i></button>
+      <button class="nav-btn" data-panel="goals"><span><svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></svg></span><small>任務</small><i id="goalBadge" class="badge hidden">!</i></button>
     </nav>
   </div>
   <div id="toastLayer" class="toast-layer" aria-live="polite"></div>

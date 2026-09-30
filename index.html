@@ -3,77 +3,102 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-  <meta name="theme-color" content="#07111f" />
+  <meta name="theme-color" content="#050816" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="description" content="スマホで遊べる本格インクリメンタル・ストラテジーゲーム" />
+  <meta name="apple-mobile-web-app-title" content="星界覇王" />
+  <meta name="description" content="基地を育て、艦隊を編成し、星域を征服せよ。スマホで遊べるインクリメンタル・ストラテジー。" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="assets/icon-180.png" />
+  <link rel="preload" href="assets/fonts/chakra-petch-700.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="styles.css" />
   <title>星界覇王 - STELLAR DOMINION</title>
 </head>
 <body>
-  <div id="app" class="app-shell">
-    <header class="topbar glass">
-      <div class="brand"><img src="assets/icon.svg" alt="" /><div><strong>星界覇王</strong><small>STELLAR DOMINION</small></div><span class="system-status"><i></i>ONLINE</span></div>
-      <div class="top-actions">
-        <button id="soundBtn" class="icon-btn" aria-label="サウンド切替">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4h4l5 4V6L9 10H5Z"/><path class="sound-wave" d="M17 9c1.5 1.7 1.5 4.3 0 6M19.5 6.5c3 3.1 3 7.9 0 11"/><path class="sound-muted" d="m17 9 5 6M22 9l-5 6"/></svg>
-        </button>
-        <button id="helpBtn" class="icon-btn" aria-label="遊び方">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M9.8 9a2.5 2.5 0 0 1 4.7 1.1c0 2-2.5 2.3-2.5 4M12 17.2v.1"/></svg>
-        </button>
+  <div id="splash" class="splash" aria-hidden="true">
+    <div class="splash-glow"></div>
+    <img class="splash-logo" src="assets/icon.svg" alt="" width="112" height="112" />
+    <div class="splash-title">星界覇王</div>
+    <div class="splash-sub">STELLAR DOMINION</div>
+    <div class="splash-bar"><i></i></div>
+  </div>
+
+  <div class="space" aria-hidden="true">
+    <div class="space-nebula"></div>
+    <div class="space-stars far"></div>
+    <div class="space-stars near"></div>
+  </div>
+
+  <div id="app" class="app">
+    <header class="hud">
+      <div class="hud-top">
+        <div class="brand">
+          <span id="brandMark" class="brand-emblem"></span>
+          <div class="brand-text"><b>星界覇王</b><small>STELLAR DOMINION</small></div>
+        </div>
+        <div class="hud-actions">
+          <div class="star-pill" id="starPill" aria-label="覇王星"><span id="starIcon"></span><b id="starCount">0</b></div>
+          <button id="soundBtn" class="round-btn" aria-label="サウンド切替"></button>
+          <button id="helpBtn" class="round-btn" aria-label="遊び方と設定"></button>
+        </div>
       </div>
+      <div id="resources" class="res-bar" aria-label="資源"></div>
     </header>
-    <section id="resources" class="resource-grid" aria-label="資源"></section>
-    <main>
-      <section id="panel-base" class="panel active">
-        <div class="section-head command-head">
-          <div><span class="eyebrow">FRONTIER COMMAND</span><h2>司令基地</h2></div>
-          <div class="command-chips"><span id="globalMultiplier" class="pill">総合 ×1.00</span><span id="fleetPower" class="power-chip">戦力 0</span></div>
-        </div>
-        <div class="command-scene glass">
-          <div class="command-stars" aria-hidden="true"></div>
-          <div class="command-vignette" aria-hidden="true"></div>
-          <div class="command-orbit orbit-a" aria-hidden="true"></div>
-          <div class="command-orbit orbit-b" aria-hidden="true"></div>
-          <svg class="command-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <path d="M50 39 L20 25 M50 39 L79 24 M50 39 L18 66 M50 39 L80 65 M50 39 L50 78"/>
-            <circle cx="50" cy="39" r="17"/>
-          </svg>
-          <div id="commandScene" class="command-scene-layer" aria-label="司令基地の施設と艦隊"></div>
-          <button id="surgeBtn" class="scene-surge" aria-label="資源サージ">
-            <span class="surge-core">⚡</span>
-            <span><b>資源サージ</b><small id="surgeValue">+30秒分</small></span>
+
+    <main class="stage">
+      <section id="panel-base" class="panel active" aria-label="司令基地">
+        <div id="baseScene" class="scene base-scene">
+          <div class="horizon" aria-hidden="true"></div>
+          <div class="ground" aria-hidden="true"><div class="ground-grid"></div></div>
+          <svg class="conduits" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div id="fleetLayer" class="fleet-layer"></div>
+          <div id="facilityLayer" class="facility-layer"></div>
+          <button id="surgeBtn" class="surge-btn" aria-label="資源サージ">
+            <span class="surge-ring"></span>
+            <span class="surge-core"></span>
+            <span class="surge-label"><b>サージ</b><small id="surgeValue">+30秒</small></span>
           </button>
-          <div id="floatingLayer" class="floating-layer" aria-hidden="true"></div>
         </div>
-        <div id="commandDetail" class="command-detail glass" aria-live="polite"></div>
+        <div id="commandDetail" class="sheet detail-sheet" aria-live="polite"></div>
       </section>
-      <section id="panel-map" class="panel">
-        <div class="section-head"><div><span class="eyebrow">CONQUEST</span><h2>星域征服</h2></div><span id="streakChip" class="pill">連勝 0</span></div>
-        <div id="galaxyMap" class="galaxy-map glass">
-          <div class="stars"></div><svg class="route-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M18 67 L35 35 L55 72 L69 42 L84 69 L91 27" /></svg>
-          <div id="territoryNodes"></div>
+
+      <section id="panel-map" class="panel" aria-label="星域征服">
+        <div id="mapScene" class="scene map-scene">
+          <svg id="routeSvg" class="route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div id="territoryLayer" class="territory-layer"></div>
+          <div class="scene-chips">
+            <span class="chip" id="stageChip"></span>
+            <span class="chip" id="streakChip"></span>
+          </div>
         </div>
-        <div id="battleCard" class="battle-card glass"></div>
+        <div id="battleCard" class="sheet battle-sheet"></div>
       </section>
-      <section id="panel-goals" class="panel">
-        <div class="section-head"><div><span class="eyebrow">OPERATIONS</span><h2>ミッション</h2></div><span class="pill">恒久報酬あり</span></div>
+
+      <section id="panel-goals" class="panel panel-scroll" aria-label="任務と超越">
+        <div class="section-title"><span>OPERATIONS</span><h2>ミッション</h2></div>
         <div id="missionList" class="mission-list"></div>
-        <div class="section-head spaced"><div><span class="eyebrow">LEGACY</span><h2>超越</h2></div><span id="starsChip" class="power-chip">★ 0</span></div>
-        <div id="prestigeCard" class="prestige-card glass"></div>
+        <div class="section-title"><span>LEGACY</span><h2>銀河超越</h2></div>
+        <div id="prestigeCard" class="prestige-card"></div>
       </section>
     </main>
-    <nav class="bottom-nav glass" aria-label="メインメニュー">
-      <button class="nav-btn active" data-panel="base"><span><svg viewBox="0 0 24 24"><path d="M4 20V9l8-5 8 5v11H4Z"/><path d="M9 20v-6h6v6M8 10h8"/></svg></span><small>司令基地</small></button>
-      <button class="nav-btn" data-panel="map"><span><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></span><small>征服</small><i id="mapBadge" class="badge hidden">!</i></button>
-      <button class="nav-btn" data-panel="goals"><span><svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></svg></span><small>任務</small><i id="goalBadge" class="badge hidden">!</i></button>
+
+    <nav class="tabbar" aria-label="メインメニュー">
+      <i class="tab-indicator" aria-hidden="true"></i>
+      <button class="tab active" data-panel="base"><span class="tab-ico" data-icon="base"></span><small>基地</small></button>
+      <button class="tab" data-panel="map"><span class="tab-ico" data-icon="map"></span><small>征服</small><i id="mapBadge" class="badge hidden"></i></button>
+      <button class="tab" data-panel="goals"><span class="tab-ico" data-icon="goals"></span><small>任務</small><i id="goalBadge" class="badge hidden"></i></button>
     </nav>
   </div>
+
   <div id="toastLayer" class="toast-layer" aria-live="polite"></div>
-  <div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="modal-card glass"><button id="modalClose" class="modal-close" aria-label="閉じる">×</button><div id="modalBody"></div></div></div>
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card"><button id="modalClose" class="modal-close round-btn" aria-label="閉じる"></button><div id="modalBody"></div></div>
+  </div>
+  <div id="battleOverlay" class="battle-overlay hidden" aria-live="assertive"></div>
   <canvas id="fxCanvas" class="fx-canvas" aria-hidden="true"></canvas>
+  <div id="flyLayer" class="fly-layer" aria-hidden="true"></div>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

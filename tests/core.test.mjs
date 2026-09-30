@@ -180,3 +180,12 @@ test("late conquest enemies scale up sharply", () => {
   }
   assert.ok(TERRITORIES[5].power / TERRITORIES[2].power >= 5);
 });
+
+test("service worker precaches files that exist", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const source = readFileSync(new URL("../sw.js", import.meta.url), "utf8");
+  const assets = JSON.parse(source.match(/const ASSETS = (\[[\s\S]*?\]);/)[1].replace(/,\s*\]/, "]"));
+  for (const path of assets.filter(p => p !== "./")) {
+    assert.ok(existsSync(new URL(`../${path.slice(2)}`, import.meta.url)), `missing ${path}`);
+  }
+});

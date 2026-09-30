@@ -1,1 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><defs><radialGradient id="b" cx="45%" cy="35%"><stop stop-color="#9affff"/><stop offset=".25" stop-color="#32d8ff"/><stop offset=".72" stop-color="#1355c8"/><stop offset="1" stop-color="#080c24"/></radialGradient><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#59efff"/><stop offset="1" stop-color="#9b63ff"/></linearGradient></defs><rect width="128" height="128" rx="28" fill="#06101b"/><circle cx="64" cy="64" r="45" fill="url(#b)" opacity=".35"/><path d="M64 18 78 48l33 7-25 22 7 33-29-17-29 17 7-33-25-22 33-7z" fill="none" stroke="url(#g)" stroke-width="7" stroke-linejoin="round"/><circle cx="64" cy="64" r="10" fill="#dfffff"/><circle cx="64" cy="64" r="19" fill="none" stroke="#49e7ff" stroke-width="3" opacity=".7"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx=".5" cy=".42" r=".75"><stop offset="0" stop-color="#23307a"/><stop offset=".55" stop-color="#0b1236"/><stop offset="1" stop-color="#04060f"/></radialGradient>
+    <radialGradient id="neb" cx=".78" cy=".2" r=".5"><stop offset="0" stop-color="#8a4dff" stop-opacity=".55"/><stop offset="1" stop-color="#8a4dff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff4c6"/><stop offset=".45" stop-color="#ffc53d"/><stop offset="1" stop-color="#b3620a"/></linearGradient>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#16204e"/><stop offset="1" stop-color="#070b22"/></linearGradient>
+    <radialGradient id="planet" cx=".36" cy=".3" r=".8"><stop offset="0" stop-color="#d8fbff"/><stop offset=".3" stop-color="#46d2ff"/><stop offset=".7" stop-color="#1a5fd6"/><stop offset="1" stop-color="#140e58"/></radialGradient>
+    <radialGradient id="glow"><stop offset="0" stop-color="#38e1ff" stop-opacity=".6"/><stop offset="1" stop-color="#38e1ff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffe7a3" stop-opacity=".2"/><stop offset=".5" stop-color="#ffd36a"/><stop offset="1" stop-color="#ffe7a3" stop-opacity=".2"/></linearGradient>
+    <linearGradient id="star" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#cfe9ff"/></linearGradient>
+    <clipPath id="pc"><circle cx="256" cy="276" r="92"/></clipPath>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#neb)"/>
+  <g fill="#fff" opacity=".8"><circle cx="70" cy="90" r="2.4"/><circle cx="440" cy="70" r="1.8"/><circle cx="460" cy="420" r="2.2"/><circle cx="60" cy="400" r="1.6"/><circle cx="120" cy="200" r="1.4"/><circle cx="400" cy="250" r="1.4"/><circle cx="150" cy="460" r="1.8"/></g>
+  <circle cx="256" cy="270" r="210" fill="url(#glow)"/>
+  <path d="M256 58 426 156v200L256 454 86 356V156Z" fill="#000" opacity=".35" transform="translate(0 10)"/>
+  <path d="M256 58 426 156v200L256 454 86 356V156Z" fill="url(#plate)" stroke="url(#rim)" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M256 86 402 170v172L256 426 110 342V170Z" fill="none" stroke="#38e1ff" stroke-width="3" opacity=".45"/>
+  <path d="M128 318 A150 44 -18 0 1 392 206" fill="none" stroke="url(#ring)" stroke-width="16" opacity=".75"/>
+  <circle cx="256" cy="276" r="92" fill="url(#planet)"/>
+  <g clip-path="url(#pc)" opacity=".35"><path d="M160 250 Q256 220 352 262" stroke="#fff" stroke-width="10" fill="none"/><path d="M168 300 Q256 280 350 310" stroke="#0a2a7a" stroke-width="14" fill="none"/></g>
+  <circle cx="256" cy="276" r="92" fill="none" stroke="#9ff4ff" stroke-width="3" opacity=".6"/>
+  <path d="M120 346 A150 44 -18 0 0 400 238" fill="none" stroke="url(#ring)" stroke-width="18"/>
+  <path d="M256 104l19 48 52 5-40 34 13 51-44-28-44 28 13-51-40-34 52-5Z" fill="#0b1236" opacity=".5" transform="translate(0 8)"/>
+  <path d="M256 104l19 48 52 5-40 34 13 51-44-28-44 28 13-51-40-34 52-5Z" fill="url(#star)" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
+</svg>

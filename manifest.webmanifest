@@ -1,14 +1,17 @@
 {
   "name": "星界覇王 - STELLAR DOMINION",
   "short_name": "星界覇王",
-  "description": "スマホ向け本格インクリメンタル・ストラテジー",
+  "description": "基地を育て、艦隊を編成し、星域を征服するスマホ向けインクリメンタル・ストラテジー",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#01050c",
-  "theme_color": "#06101b",
+  "background_color": "#050816",
+  "theme_color": "#050816",
   "icons": [
-    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

@@ -25,6 +25,9 @@ jobs:
         run: |
           node --check js/app.js
           node --check js/game-core.js
+          node --check js/art.js
+          node --check js/fx.js
+          node --check js/audio.js
           npm test
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

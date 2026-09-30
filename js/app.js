@@ -4,455 +4,1045 @@ import {
   buildingCost, unitCost, isUnlocked, upgradeBuilding, recruitUnit, fleetPower,
   targetTerritory, battlePreview, resolveBattle, surge, missionList, claimMission,
   checkAchievements, availablePrestigeStars, canPrestige, prestige, tick,
-  compactNumber, formatCost
+  compactNumber
 } from "./game-core.js";
+import { injectDefs, facilityArt, facilityTier, shipArt, planetArt, resourceIcon, starIcon, icon, brandMark } from "./art.js";
+import { sfx, unlockAudio, setSoundEnabled } from "./audio.js";
+import { initFx, burst, burstAt, flyResources } from "./fx.js";
 
 const SAVE_KEY = "stellar-dominion-save-v1";
+const OFFLINE_CAP = 8 * 3600;
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+const h = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-let state = loadState();
-let lastFrame = performance.now();
-let lastRender = 0;
-let lastSave = 0;
-let audioCtx = null;
-let prestigeInProgress = false;
-let resetInProgress = false;
-let selectedCommandTarget = { type: "building", key: "command" };
-
-const BUILDING_SCENE_POSITIONS = {
-  command: [50, 39],
-  extractor: [20, 25],
-  reactor: [79, 24],
-  market: [18, 66],
-  observatory: [80, 65],
-  foundry: [50, 78],
+const FACILITY_POS = {
+  extractor: [19, 43], reactor: [81, 43], command: [50, 54],
+  market: [19, 73], observatory: [80, 72], foundry: [50, 89],
 };
+const FLEET_POS = { striker: 20, guardian: 50, siege: 80 };
+const FORMATION = [[0, 0], [-1, -1], [-1, 1], [-2, -2], [-2, 2], [-3, 0]];
+const TIER_NAME = ["BLUEPRINT", "TIER I", "TIER II", "TIER III"];
+const MISSION_ICON = { "m-build-12": "build", "m-fleet-350": "fleet", "m-conquer-3": "flag", "m-produce-50k": "trend" };
+const BONUS_LABEL = { credits: "クレジット", alloy: "合金", energy: "エネルギー", intel: "情報", all: "全資源" };
 
-const UNIT_SCENE_POSITIONS = {
-  striker: [36, 55],
-  guardian: [50, 59],
-  siege: [64, 55],
-};
+let state = null;
+let welcome = null;
+let selected = { type: "building", key: "command" };
+let activePanel = "base";
+let detailKey = "";
+let mapKey = "";
+let battleKey = "";
+let busy = false;
+let suppressClick = false;
+const hold = Object.fromEntries(RESOURCE_KEYS.map(k => [k, 0]));
+const shown = Object.fromEntries(RESOURCE_KEYS.map(k => [k, 0]));
+const fresh = new Set();
+const refs = { res: {}, facilities: {}, fleets: {}, missions: {} };
 
+// ---------------------------------------------------------------- state
 function loadState() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(SAVE_KEY));
-    const next = normalizeState(raw);
-    const elapsed = Math.max(0, (Date.now() - (next.lastSeenAt || Date.now())) / 1000);
-    if (elapsed > 5) {
-      const capped = Math.min(elapsed, 8 * 3600);
-      const result = tick(next, capped);
-      queueMicrotask(() => toast(`おかえり！ オフライン${formatDuration(capped)}分を回収 +${compactNumber(result.produced)}`));
-    }
-    next.lastSeenAt = Date.now();
-    return next;
-  } catch {
-    return createInitialState();
-  }
+  let next;
+  try { next = normalizeState(JSON.parse(localStorage.getItem(SAVE_KEY))); }
+  catch { next = createInitialState(); }
+  const elapsed = Math.max(0, (Date.now() - (next.lastSeenAt || Date.now())) / 1000);
+  if (elapsed > 5) welcome = collectOffline(next, Math.min(elapsed, OFFLINE_CAP));
+  next.lastSeenAt = Date.now();
+  return next;
 }
 
+function collectOffline(target, seconds) {
+  const before = { ...target.resources };
+  const result = tick(target, seconds);
+  const gains = Object.fromEntries(RESOURCE_KEYS.map(k => [k, target.resources[k] - before[k]]));
+  return { seconds, gains, total: result.produced };
+}
+
+let resetting = false;
 function saveState() {
-  if (resetInProgress) return;
+  if (resetting) return;
   state.lastSeenAt = Date.now();
-  localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch {}
 }
 
+const reducedMotion = () => state?.settings.reducedMotion || matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---------------------------------------------------------------- format helpers
 function formatDuration(sec) {
   if (sec < 60) return `${Math.floor(sec)}秒`;
   if (sec < 3600) return `${Math.floor(sec / 60)}分`;
-  return `${Math.floor(sec / 3600)}時間`;
+  const hrs = Math.floor(sec / 3600), min = Math.floor((sec % 3600) / 60);
+  return min ? `${hrs}時間${min}分` : `${hrs}時間`;
 }
 
-function sound(kind = "tap") {
-  if (!state.settings.sound) return;
-  try {
-    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    const now = audioCtx.currentTime;
-    const freq = kind === "win" ? 620 : kind === "fail" ? 120 : kind === "upgrade" ? 420 : 240;
-    osc.type = kind === "win" ? "triangle" : "sine";
-    osc.frequency.setValueAtTime(freq, now);
-    if (kind === "win") osc.frequency.exponentialRampToValueAtTime(980, now + .14);
-    gain.gain.setValueAtTime(.0001, now);
-    gain.gain.exponentialRampToValueAtTime(.08, now + .01);
-    gain.gain.exponentialRampToValueAtTime(.0001, now + .16);
-    osc.connect(gain).connect(audioCtx.destination);
-    osc.start(now); osc.stop(now + .18);
-  } catch {}
+function formatClock(sec) {
+  if (!Number.isFinite(sec)) return "--:--";
+  const s = Math.ceil(sec);
+  const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+  return hh ? `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}` : `${mm}:${String(ss).padStart(2, "0")}`;
 }
 
-function haptic(ms = 20) { navigator.vibrate?.(ms); }
-
-function toast(message) {
-  const layer = $("#toastLayer");
-  if (!layer) return;
-  const el = document.createElement("div");
-  el.className = "toast";
-  el.textContent = message;
-  layer.append(el);
-  setTimeout(() => el.remove(), 2700);
-}
-
-function showModal(html) {
-  $("#modalBody").innerHTML = html;
-  $("#modal").classList.remove("hidden");
-}
-
-function closeModal() { $("#modal").classList.add("hidden"); }
-
-function resourceGlyph(key) {
-  const glyphs = {
-    credits: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 19 7v10l-7 4-7-4V7l7-4Z"/><path d="m9 9 3-2 3 2v6l-3 2-3-2V9Z"/></svg>',
-    alloy: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10l4 8-4 8H7l-4-8 4-8Z"/><path d="M9 8h6l2 4-2 4H9l-2-4 2-4Z"/></svg>',
-    energy: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-7 11h5l-1 9 8-12h-5V2Z"/></svg>',
-    intel: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 12 12 21 4 12 12 3Z"/><circle cx="12" cy="12" r="3"/></svg>',
-  };
-  return glyphs[key] || "";
-}
-
-function facilityGlyph(key) {
-  const glyphs = {
-    command: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 25 9v14l-9 6-9-6V9l9-6Z"/><circle cx="16" cy="16" r="5"/><path d="M16 3v8M7 9l6 4M25 9l-6 4M7 23l6-4M25 23l-6-4M16 29v-8"/></svg>',
-    extractor: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 23h22l-3 5H8l-3-5Z"/><path d="m9 23 3-12h8l3 12"/><path d="M13 11 16 4l3 7M10 17h12"/></svg>',
-    reactor: '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="10"/><circle cx="16" cy="16" r="4"/><path d="M16 2v5M16 25v5M2 16h5M25 16h5M6 6l4 4M22 22l4 4M26 6l-4 4M10 22l-4 4"/></svg>',
-    market: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M6 9h20l-2 5H8L6 9Z"/><path d="M9 14v12h14V14M12 18h8M16 18v8"/></svg>',
-    observatory: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 12c7-8 15-7 19-3-3 5-9 10-18 9"/><path d="m12 18-4 9M18 18l5 9M8 27h18"/><circle cx="22" cy="9" r="2.5"/></svg>',
-    foundry: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 25h22V12l-6 4v-6l-7 5V9L5 14v11Z"/><path d="M10 20h4M18 20h4M16 3v7"/></svg>',
-  };
-  return glyphs[key] || "";
-}
-
-function renderResources() {
+function etaFor(cost) {
   const rates = productionPerSecond(state);
-  $("#resources").innerHTML = RESOURCE_KEYS.map(key => `
-    <div class="resource resource-${key}">
-      <span class="resource-top"><b class="resource-glyph">${resourceGlyph(key)}</b>${RESOURCE_META[key].name}</span>
-      <span class="resource-value">${compactNumber(state.resources[key])}</span>
-      <span class="resource-rate">+${compactNumber(rates[key])}/秒</span>
-    </div>`).join("");
-}
-
-function canAffordCost(cost) { return Object.entries(cost).every(([k, v]) => state.resources[k] >= v); }
-
-function sceneShipClass(key) {
-  return `fleet-ship fleet-ship-${key}`;
-}
-
-function renderFleetCluster(key, count) {
-  const visible = Math.min(count, 6);
-  const ships = Array.from({ length: visible }, (_, index) =>
-    `<i class="${sceneShipClass(key)} scene-fleet-ship" style="--ship-index:${index}" aria-hidden="true"></i>`
-  ).join("");
-  const overflow = count > visible ? `<b class="scene-fleet-overflow">+${count - visible}</b>` : "";
-  return ships + overflow;
-}
-
-function buildingSceneNode(key, def) {
-  const unlocked = isUnlocked(state, def);
-  const [x, y] = BUILDING_SCENE_POSITIONS[key];
-  const level = state.buildings[key] || 0;
-  const selected = selectedCommandTarget.type === "building" && selectedCommandTarget.key === key;
-  return `<button class="command-node building-node node-${key} ${unlocked ? "" : "locked"} ${selected ? "selected" : ""}" data-scene-building="${key}" style="left:${x}%;top:${y}%" aria-label="${def.name}">
-    <span class="command-node-icon">${facilityGlyph(key)}</span>
-    <span class="command-node-name">${def.name}</span>
-    <span class="command-node-level">${unlocked ? `Lv.${level}` : "LOCK"}</span>
-  </button>`;
-}
-
-function unitSceneNode(key, def) {
-  const unlocked = isUnlocked(state, def);
-  const [x, y] = UNIT_SCENE_POSITIONS[key];
-  const count = state.units[key] || 0;
-  const selected = selectedCommandTarget.type === "unit" && selectedCommandTarget.key === key;
-  return `<button class="command-node unit-node node-unit-${key} ${unlocked ? "" : "locked"} ${selected ? "selected" : ""}" data-scene-unit="${key}" style="left:${x}%;top:${y}%" aria-label="${def.name} ${count}隻">
-    <span class="scene-fleet">${renderFleetCluster(key, count)}</span>
-    <span class="command-node-name">${def.name}</span>
-    <span class="command-node-level">${unlocked ? `${count}隻` : "LOCK"}</span>
-  </button>`;
-}
-
-function renderCommandDetail() {
-  const detail = $("#commandDetail");
-  if (!detail) return;
-
-  if (selectedCommandTarget.type === "unit") {
-    const key = selectedCommandTarget.key;
-    const def = UNITS[key];
-    const unlocked = isUnlocked(state, def);
-    const count = state.units[key] || 0;
-    const cost = unitCost(state, key, 1);
-    detail.innerHTML = `<div class="detail-copy">
-      <span class="eyebrow">ARMADA</span>
-      <div class="detail-title"><span class="detail-icon unit-detail-icon"><i class="${sceneShipClass(key)}"></i></span><div><h3>${def.name}</h3><small>${def.role} · 保有 ${count}隻 · 1隻 ${def.power}戦力</small></div></div>
-      <p>${unlocked ? `${UNITS[def.strongAgainst]?.role || ""}タイプに強い艦種。建造するほど基地上の艦影も増えます。` : `司令中枢 Lv${def.unlock?.command} で解禁`}</p>
-    </div>
-    <button class="detail-action recruit-btn" data-recruit-unit="${key}" ${!unlocked || !canAffordCost(cost) ? "disabled" : ""}>+1 建造<small>${formatCost(cost)}</small></button>`;
-    return;
+  let worst = 0;
+  for (const [k, v] of Object.entries(cost)) {
+    const lack = v - state.resources[k];
+    if (lack <= 0) continue;
+    if (rates[k] <= 0) return Infinity;
+    worst = Math.max(worst, lack / rates[k]);
   }
-
-  const key = selectedCommandTarget.key;
-  const def = BUILDINGS[key];
-  const unlocked = isUnlocked(state, def);
-  const level = state.buildings[key] || 0;
-  const cost = buildingCost(state, key);
-  const rates = productionPerSecond(state);
-  const effect = Object.entries(def.production).length
-    ? Object.keys(def.production).map(resource => `${RESOURCE_META[resource].icon} ${compactNumber(rates[resource])}/秒`).join(" · ")
-    : key === "foundry" ? `全生産 +${level * 18}% / 艦隊補正 +${level * 10}%`
-    : `帝国補正 +${Math.max(0, level - 1) * 5}%`;
-
-  detail.innerHTML = `<div class="detail-copy">
-    <span class="eyebrow">FACILITY</span>
-    <div class="detail-title"><span class="detail-icon facility-detail-icon">${facilityGlyph(key)}</span><div><h3>${def.name}</h3><small>Lv.${level} · ${unlocked ? effect : `司令中枢 Lv${def.unlock?.command} で解禁`}</small></div></div>
-    <p>${def.description}</p>
-  </div>
-  <button class="detail-action upgrade-btn" data-upgrade-building="${key}" ${!unlocked || !canAffordCost(cost) ? "disabled" : ""}>強化<small>${formatCost(cost)}</small></button>`;
+  return worst;
 }
 
-function renderCommandScene() {
+const affordable = cost => Object.entries(cost).every(([k, v]) => state.resources[k] >= v);
+
+// Whole numbers (fleet power, enemy power, counts) should never render as "40.0".
+const fmtInt = v => (v < 1000 ? String(Math.floor(v)) : compactNumber(v));
+
+function costChips(cost) {
+  return Object.entries(cost).map(([k, v]) => `<span class="cost" data-cost="${k}">${resourceIcon(k)}<b>${fmtInt(v)}</b></span>`).join("");
+}
+
+function rewardChips(reward) {
+  return Object.entries(reward).map(([k, v]) => `<span class="reward">${resourceIcon(k)}<b>${fmtInt(v)}</b></span>`).join("");
+}
+
+function setText(el, text) { if (el && el.textContent !== text) el.textContent = text; }
+function setHTML(el, html) { if (el && el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; } }
+function setClass(el, cls, on) { if (el && el.classList.contains(cls) !== on) el.classList.toggle(cls, on); }
+
+function haptic(pattern = 12) { try { navigator.vibrate?.(pattern); } catch {} }
+
+// ---------------------------------------------------------------- HUD
+function buildHud() {
+  $("#brandMark").innerHTML = `${brandMark()}<i id="cmdLevel" class="cmdr-lv">1</i>`;
+  $(".brand-text").innerHTML = `<b>司令官</b><span class="cmdr-stats"><span>${icon("power")}<em id="powerVal">0</em></span><span>${icon("trend")}<em id="multVal">×1.00</em></span></span>`;
+  $("#starIcon").innerHTML = starIcon();
+  $("#soundBtn").innerHTML = icon("sound");
+  $("#helpBtn").innerHTML = icon("help");
+  $("#modalClose").innerHTML = icon("close");
+  $$(".tab-ico").forEach(el => { el.innerHTML = icon(el.dataset.icon); });
+  $("#resources").innerHTML = RESOURCE_KEYS.map(k => `
+    <div class="res res-${k}" data-res="${k}">
+      <span class="res-ico">${resourceIcon(k)}</span>
+      <span class="res-txt"><b class="res-val">0</b><small class="res-rate">+0/秒</small></span>
+    </div>`).join("");
+  for (const k of RESOURCE_KEYS) {
+    const el = $(`[data-res="${k}"]`);
+    refs.res[k] = { el, val: $(".res-val", el), rate: $(".res-rate", el) };
+    shown[k] = Math.max(0, state.resources[k] - hold[k]);
+  }
+  refs.cmdLevel = $("#cmdLevel");
+  refs.powerVal = $("#powerVal");
+  refs.multVal = $("#multVal");
+  refs.starCount = $("#starCount");
+  syncSoundButton();
+}
+
+function updateHud(dt) {
+  const k = 1 - Math.exp(-dt * 9);
+  for (const key of RESOURCE_KEYS) {
+    const target = Math.max(0, state.resources[key] - hold[key]);
+    const diff = target - shown[key];
+    const big = Math.abs(diff) > Math.max(1, Math.abs(target) * .004);
+    shown[key] = big ? shown[key] + diff * k : target;
+    setText(refs.res[key].val, compactNumber(shown[key]));
+  }
+}
+
+function updateHudSlow() {
+  const rates = productionPerSecond(state);
+  for (const key of RESOURCE_KEYS) setText(refs.res[key].rate, `+${compactNumber(rates[key])}/秒`);
   const mult = productionMultipliers(state);
   const avg = RESOURCE_KEYS.reduce((sum, key) => sum + mult[key], 0) / RESOURCE_KEYS.length;
-  $("#globalMultiplier").textContent = `総合 ×${avg.toFixed(2)}`;
-  $("#fleetPower").textContent = `戦力 ${compactNumber(fleetPower(state))}`;
-  $("#surgeValue").textContent = `+${30 + state.buildings.command * 2}秒分`;
+  setText(refs.multVal, `×${avg.toFixed(2)}`);
+  setText(refs.powerVal, fmtInt(fleetPower(state)));
+  setText(refs.cmdLevel, String(state.buildings.command));
+  setText(refs.starCount, String(state.prestige.stars));
+}
 
-  const buildingNodes = Object.entries(BUILDINGS).map(([key, def]) => buildingSceneNode(key, def)).join("");
-  const unitNodes = Object.entries(UNITS).map(([key, def]) => unitSceneNode(key, def)).join("");
-  $("#commandScene").innerHTML = buildingNodes + unitNodes;
-  renderCommandDetail();
+function bump(el) {
+  if (!el || reducedMotion()) return;
+  el.animate([{ transform: "scale(1)" }, { transform: "scale(1.12)", filter: "brightness(1.5)" }, { transform: "scale(1)" }], { duration: 260, easing: "ease-out" });
 }
-function nodeIcon(t) {
-  const icons = {
-    mining: '<svg viewBox="0 0 24 24"><path d="M7 5h10l4 7-4 7H7l-4-7 4-7Z"/></svg>',
-    trade: '<svg viewBox="0 0 24 24"><path d="M12 3 20 8v8l-8 5-8-5V8l8-5Z"/><path d="M8 12h8M12 8v8"/></svg>',
-    energy: '<svg viewBox="0 0 24 24"><path d="m13 2-7 11h5l-1 9 8-12h-5V2Z"/></svg>',
-    intel: '<svg viewBox="0 0 24 24"><path d="M12 3 20 12 12 21 4 12 12 3Z"/><circle cx="12" cy="12" r="3"/></svg>',
-    fortress: '<svg viewBox="0 0 24 24"><path d="M5 20V8l3 2 4-6 4 6 3-2v12H5Z"/><path d="M9 20v-5h6v5"/></svg>',
-    boss: '<svg viewBox="0 0 24 24"><path d="m12 2 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-6Z"/></svg>',
-  };
-  return icons[t.type] || "";
+
+function flyGains(from, gains, { sound = "coin" } = {}) {
+  const clean = Object.fromEntries(Object.entries(gains).filter(([k, v]) => RESOURCE_KEYS.includes(k) && v > 0));
+  for (const [k, v] of Object.entries(clean)) hold[k] += v;
+  let played = false;
+  flyResources(from, clean, k => refs.res[k]?.el, k => {
+    hold[k] = Math.max(0, hold[k] - clean[k]);
+    bump(refs.res[k].el);
+    if (!played) { played = true; sfx(sound); }
+  });
 }
+
+// ---------------------------------------------------------------- base scene
+function buildBaseScene() {
+  const conduits = $(".conduits");
+  conduits.innerHTML = Object.entries(FACILITY_POS).filter(([k]) => k !== "command")
+    .map(([k, [x, y]]) => `<path data-conduit="${k}" d="M${FACILITY_POS.command[0]} ${FACILITY_POS.command[1]} L${x} ${y}"/>`).join("");
+
+  $("#facilityLayer").innerHTML = Object.entries(BUILDINGS).map(([key, def]) => {
+    const [x, y] = FACILITY_POS[key];
+    return `<button class="facility ${key === "command" ? "facility-main" : ""}" data-facility="${key}" style="left:${x}%;top:${y}%" aria-label="${def.name}">
+      <span class="facility-sel" aria-hidden="true"></span>
+      <span class="facility-art-wrap"></span>
+      <span class="up-badge" aria-hidden="true">${icon("up")}</span>
+      <span class="facility-label"><b>${def.name}</b><em class="facility-lv"></em></span>
+    </button>`;
+  }).join("");
+
+  $("#fleetLayer").innerHTML = Object.entries(UNITS).map(([key, def]) => `
+    <button class="fleet-group fleet-${key}" data-unit="${key}" style="left:${FLEET_POS[key]}%" aria-label="${def.name}">
+      <span class="formation"></span>
+      <span class="fleet-label"><b>${def.name}</b><em class="fleet-count"></em></span>
+    </button>`).join("");
+
+  for (const key of Object.keys(BUILDINGS)) {
+    const el = $(`[data-facility="${key}"]`);
+    refs.facilities[key] = { el, art: $(".facility-art-wrap", el), lv: $(".facility-lv", el), conduit: $(`[data-conduit="${key}"]`), sig: "" };
+  }
+  for (const key of Object.keys(UNITS)) {
+    const el = $(`[data-unit="${key}"]`);
+    refs.fleets[key] = { el, formation: $(".formation", el), count: $(".fleet-count", el), sig: "" };
+  }
+  $("#surgeBtn .surge-core").innerHTML = icon("bolt");
+}
+
+function updateBaseScene() {
+  for (const [key, def] of Object.entries(BUILDINGS)) {
+    const r = refs.facilities[key];
+    const unlocked = isUnlocked(state, def);
+    const level = state.buildings[key] || 0;
+    const sig = `${unlocked}:${facilityTier(level)}`;
+    if (r.sig !== sig) { r.art.innerHTML = facilityArt(key, level, !unlocked); r.sig = sig; }
+    setHTML(r.lv, unlocked ? (level ? `Lv.${level}` : "未建設") : `${icon("lock")}Lv.${def.unlock.command}`);
+    setClass(r.el, "locked", !unlocked);
+    setClass(r.el, "selected", selected.type === "building" && selected.key === key);
+    setClass(r.el, "can-up", unlocked && affordable(buildingCost(state, key)));
+    setClass(r.el, "fresh", fresh.has(key));
+    if (r.conduit) setClass(r.conduit, "live", level > 0);
+  }
+  for (const [key, def] of Object.entries(UNITS)) {
+    const r = refs.fleets[key];
+    const unlocked = isUnlocked(state, def);
+    const count = state.units[key] || 0;
+    const visible = Math.min(count, FORMATION.length);
+    const sig = `${unlocked}:${visible}`;
+    if (r.sig !== sig) {
+      r.formation.innerHTML = !unlocked
+        ? `<span class="fleet-lock">${icon("lock")}</span>`
+        : visible === 0
+          ? `<span class="ship-slot ghost" style="--dx:0;--dy:0">${shipArt(key)}</span>`
+          : FORMATION.slice(0, visible).map(([dx, dy], i) => `<span class="ship-slot" style="--dx:${dx - Math.min(...FORMATION.slice(0, visible).map(f => f[0])) / 2};--dy:${dy};--i:${i}">${shipArt(key)}</span>`).join("");
+      r.sig = sig;
+    }
+    setHTML(r.count, unlocked ? `×${count}` : `${icon("lock")}Lv.${def.unlock.command}`);
+    setClass(r.el, "locked", !unlocked);
+    setClass(r.el, "selected", selected.type === "unit" && selected.key === key);
+    setClass(r.el, "can-up", unlocked && affordable(unitCost(state, key)));
+    setClass(r.el, "fresh", fresh.has(key));
+  }
+  setText($("#surgeValue"), `+${28 + state.buildings.command * 2}秒分`);
+}
+
+// ---------------------------------------------------------------- detail sheet
+function nextUnlockText(level) {
+  const items = [...Object.values(BUILDINGS), ...Object.values(UNITS)].filter(d => d.unlock?.command === level + 1).map(d => d.name);
+  return items.length ? `次のLvで ${items.join("・")} 解禁` : "";
+}
+
+function facilityEffect(key, level) {
+  const def = BUILDINGS[key];
+  const now = productionPerSecond(state);
+  const sim = structuredClone(state);
+  sim.buildings[key] = level + 1;
+  const next = productionPerSecond(sim);
+  const produced = Object.keys(def.production);
+  if (produced.length) {
+    return produced.map(r => `${resourceIcon(r)}<span>${compactNumber(now[r])}/秒</span><i>${icon("up")}</i><em>${compactNumber(next[r])}/秒</em>`).join("");
+  }
+  if (key === "foundry") return `<span>全生産 +${level * 18}%</span><i>${icon("up")}</i><em>+${(level + 1) * 18}%</em>`;
+  return `<span>帝国補正 +${Math.max(0, level - 1) * 5}%</span><i>${icon("up")}</i><em>+${level * 5}%</em>`;
+}
+
+function renderDetail() {
+  const sheet = $("#commandDetail");
+  const isUnit = selected.type === "unit";
+  const def = isUnit ? UNITS[selected.key] : BUILDINGS[selected.key];
+  const unlocked = isUnlocked(state, def);
+  const key = `${selected.type}:${selected.key}:${unlocked}`;
+  if (key !== detailKey) {
+    detailKey = key;
+    const art = isUnit ? `<span class="detail-ship">${shipArt(selected.key)}</span>` : `<span class="detail-facility"></span>`;
+    const desc = isUnit
+      ? `<span class="tag tag-${selected.key}">${def.role}</span><span class="tag">${UNITS[def.strongAgainst].name}に強い</span><span class="tag">1隻 ${def.power}戦力</span>`
+      : `<span class="detail-desc-text">${h(def.description)}</span>`;
+    sheet.innerHTML = `
+      <div class="detail-head">
+        <div class="detail-art">${art}</div>
+        <div class="detail-info">
+          <span class="kicker" data-d="kicker"></span>
+          <h3><span>${def.name}</span><em data-d="level"></em></h3>
+          <div class="detail-desc">${desc}</div>
+          <div class="detail-effect" data-d="effect"></div>
+        </div>
+      </div>
+      <div class="detail-action">
+        <div class="cost-list" data-d="costs"></div>
+        <button class="btn action-btn" data-action="${isUnit ? "recruit" : "upgrade"}" data-key="${selected.key}">
+          <span class="btn-main" data-d="label"></span><small data-d="sub"></small>
+        </button>
+      </div>`;
+    sheet.dataset.kind = selected.type;
+    if (!reducedMotion()) sheet.animate([{ opacity: .4, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: 180, easing: "ease-out" });
+    refs.detail = Object.fromEntries($$("[data-d]", sheet).map(el => [el.dataset.d, el]));
+    refs.detail.btn = $(".action-btn", sheet);
+    refs.detail.artHolder = $(".detail-facility", sheet);
+    refs.detail.artSig = "";
+    refs.detail.costSig = "";
+  }
+  updateDetail();
+}
+
+function updateDetail() {
+  const d = refs.detail;
+  if (!d) return;
+  const isUnit = selected.type === "unit";
+  const key = selected.key;
+  const def = isUnit ? UNITS[key] : BUILDINGS[key];
+  const unlocked = isUnlocked(state, def);
+  const cost = isUnit ? unitCost(state, key) : buildingCost(state, key);
+  const can = unlocked && affordable(cost);
+
+  if (isUnit) {
+    const count = state.units[key] || 0;
+    setText(d.kicker, `FLEET · ${def.role}`);
+    setText(d.level, `×${count}`);
+    const sim = structuredClone(state); sim.units[key] += 1;
+    const html = `${icon("power")}<span>総戦力 ${fmtInt(fleetPower(state))}</span><i>${icon("up")}</i><em>${fmtInt(fleetPower(sim))}</em>`;
+    setHTML(d.effect, html);
+  } else {
+    const level = state.buildings[key] || 0;
+    const tier = facilityTier(level);
+    setText(d.kicker, `FACILITY · ${TIER_NAME[tier]}`);
+    setText(d.level, `Lv.${level}`);
+    const artSig = `${unlocked}:${tier}`;
+    if (d.artSig !== artSig) { d.artHolder.innerHTML = facilityArt(key, level, !unlocked); d.artSig = artSig; }
+    const html = unlocked ? facilityEffect(key, level) + (key === "command" && nextUnlockText(level) ? `<b class="unlock-hint">${nextUnlockText(level)}</b>` : "") : `${icon("lock")}<span>司令中枢 Lv.${def.unlock.command} で解禁</span>`;
+    setHTML(d.effect, html);
+  }
+
+  const costSig = JSON.stringify(cost);
+  if (d.costSig !== costSig) { d.costs.innerHTML = costChips(cost); d.costSig = costSig; }
+  for (const chip of d.costs.children) setClass(chip, "lack", state.resources[chip.dataset.cost] < cost[chip.dataset.cost]);
+
+  const level = state.buildings[key] || 0;
+  let label, sub;
+  if (!unlocked) { label = "ロック中"; sub = `司令Lv.${def.unlock.command}`; }
+  else if (isUnit) { label = "建造"; sub = can ? "長押しで連続" : `あと ${formatClock(etaFor(cost))}`; }
+  else { label = level ? "強化" : "建設"; sub = can ? `Lv.${level} → ${level + 1}` : `あと ${formatClock(etaFor(cost))}`; }
+  setText(d.label, label);
+  setText(d.sub, sub);
+  setClass(d.btn, "btn-green", can);
+  setClass(d.btn, "btn-wait", unlocked && !can);
+  setClass(d.btn, "btn-locked", !unlocked);
+  d.btn.setAttribute("aria-disabled", String(!can));
+}
+
+// ---------------------------------------------------------------- map
+const mapPos = t => [12 + (t.x - 18) * (76 / 73), 17 + (t.y - 27) * (62 / 45)];
+const HOME = [6, 94];
 
 function renderMap() {
   const target = targetTerritory(state);
-  $("#streakChip").textContent = `連勝 ${state.battle.streak}`;
-  $("#territoryNodes").innerHTML = TERRITORIES.map((t, i) => {
-    const done = state.conquered.includes(t.id);
-    const current = target?.id === t.id;
-    const locked = !done && !current;
-    return `<button class="territory-node ${done ? "done" : current ? "current" : "locked"} ${t.type === "boss" ? "boss" : ""}" style="left:${t.x}%;top:${t.y}%" aria-label="${t.name}" ${locked ? "disabled" : ""}><span>${done ? "✓" : nodeIcon(t)}</span><small>${t.name}</small></button>`;
-  }).join("");
-  if (!target) {
-    $("#battleCard").innerHTML = `<div class="battle-top"><div><h3>全星域制圧！</h3><p>超越して恒久強化し、新たな銀河へ。</p></div><span class="odds">100%</span></div>`;
-    $("#mapBadge").classList.add("hidden");
-    return;
+  const key = `${state.conquered.join(",")}|${target?.id || ""}`;
+  if (key !== mapKey) {
+    mapKey = key;
+    const points = [HOME, ...TERRITORIES.map(mapPos)];
+    const doneCount = state.conquered.length;
+    let route = "";
+    for (let i = 1; i < points.length; i += 1) {
+      const [x1, y1] = points[i - 1], [x2, y2] = points[i];
+      const cls = i <= doneCount ? "done" : i === doneCount + 1 ? "next" : "todo";
+      route += `<path class="${cls}" d="M${x1} ${y1} L${x2} ${y2}"/>`;
+    }
+    $("#routeSvg").innerHTML = route;
+    $("#territoryLayer").innerHTML = `<div class="home-node" style="left:${HOME[0]}%;top:${HOME[1]}%"><span>${brandMark()}</span></div>` + TERRITORIES.map((t, i) => {
+      const done = state.conquered.includes(t.id);
+      const current = target?.id === t.id;
+      const status = done ? "done" : current ? "current" : "locked";
+      const [x, y] = mapPos(t);
+      const edge = x > 80 ? "edge-r" : x < 18 ? "edge-l" : "";
+      return `<button class="planet-node ${status} ${edge} ${t.type === "boss" ? "boss" : ""}" data-territory="${t.id}" style="left:${x}%;top:${y}%" aria-label="${t.name}">
+        <span class="planet-wrap">
+          ${current ? `<svg class="reticle" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46"/><path d="M50 0v10M50 90v10M0 50h10M90 50h10"/></svg>` : ""}
+          ${planetArt(t.type)}
+          ${done ? `<span class="planet-flag">${icon("flag")}</span>` : ""}
+          ${status === "locked" ? `<span class="planet-lock">${icon("lock")}</span>` : ""}
+        </span>
+        <span class="planet-label"><b>${t.name}</b><small>${done ? "制圧済" : `敵戦力 ${fmtInt(t.power)}`}</small></span>
+        <span class="planet-index">${i + 1}</span>
+      </button>`;
+    }).join("");
   }
-  const preview = battlePreview(state, target);
-  const pct = Math.round(preview.winChance * 100);
-  const ratio = Math.min(100, preview.effective / target.power * 55);
-  $("#battleCard").innerHTML = `<div class="battle-top"><div><h3>${target.name}</h3><p>${target.enemy} · 推奨戦力 ${target.power}</p></div><span class="odds">${pct}%</span></div>
-    <div class="power-bar"><i style="width:${ratio}%"></i></div><div class="battle-meta"><span>実効戦力 ${preview.effective}</span><span>敵 ${target.power}</span></div>
-    <button class="battle-btn" data-battle="${target.id}">⚔ 作戦開始</button>`;
-  $("#mapBadge").classList.toggle("hidden", pct < 58);
+  setText($("#stageChip"), `STAGE ${Math.min(TERRITORIES.length, state.conquered.length + 1)}/${TERRITORIES.length}`);
+  setHTML($("#streakChip"), `${icon("trend")}連勝 <b>${state.battle.streak}</b>`);
+  renderBattleCard(target);
 }
 
-function renderGoals() {
-  const missions = missionList(state);
-  const claimable = missions.some(m => m.progress >= m.goal && !state.missionClaims.includes(m.id));
-  $("#goalBadge").classList.toggle("hidden", !claimable);
-  $("#starsChip").textContent = `★ ${state.prestige.stars}`;
-  $("#missionList").innerHTML = missions.map(m => {
+function bonusText(bonus) {
+  return Object.entries(bonus).map(([k, v]) => `${BONUS_LABEL[k]}生産 +${Math.round(v * 100)}%`).join(" · ");
+}
+
+function renderBattleCard(target) {
+  const card = $("#battleCard");
+  const key = target?.id || "none";
+  if (key !== battleKey) {
+    battleKey = key;
+    if (!target) {
+      card.innerHTML = `<div class="battle-clear"><span class="kicker">ALL SECTORS SECURED</span><h3>全星域制圧！</h3><p>銀河超越で覇王星を獲得し、さらに強い帝国で新たな銀河へ。</p><button class="btn btn-purple" data-goto="goals">${icon("galaxy")}<span class="btn-main">超越へ</span></button></div>`;
+      refs.battle = null;
+      return;
+    }
+    const idx = TERRITORIES.indexOf(target);
+    card.innerHTML = `
+      <div class="battle-head">
+        <div class="battle-title">
+          <span class="kicker">SECTOR ${idx + 1} · 敵 ${h(target.enemy)}</span>
+          <h3>${h(target.name)}</h3>
+          <span class="bonus-tag">${icon("trend")}${bonusText(target.bonus)}</span>
+        </div>
+        <div class="odds" data-b="odds">
+          <svg viewBox="0 0 64 64" aria-hidden="true"><circle class="odds-track" cx="32" cy="32" r="27"/><circle class="odds-fill" cx="32" cy="32" r="27" data-b="ring"/></svg>
+          <b data-b="pct">0%</b><small>勝率</small>
+        </div>
+      </div>
+      <div class="versus">
+        <div class="vs-side own"><small>自軍 実効戦力</small><b data-b="own">0</b></div>
+        <div class="vs-bar"><i class="vs-own" data-b="bar"></i><span class="vs-mark">VS</span></div>
+        <div class="vs-side enemy"><small>敵戦力</small><b>${fmtInt(target.power)}</b></div>
+      </div>
+      <div class="battle-foot">
+        <div class="reward-box"><small>制圧報酬</small><div class="reward-list">${rewardChips(target.reward)}</div></div>
+        <button class="btn btn-red battle-btn" data-battle="${target.id}">${icon("sword")}<span class="btn-main">出撃</span></button>
+      </div>`;
+    refs.battle = Object.fromEntries($$("[data-b]", card).map(el => [el.dataset.b, el]));
+  }
+  if (!refs.battle) return;
+  const preview = battlePreview(state, target);
+  const pct = Math.round(preview.winChance * 100);
+  setText(refs.battle.pct, `${pct}%`);
+  setText(refs.battle.own, fmtInt(preview.effective));
+  const tone = pct < 40 ? "bad" : pct < 65 ? "mid" : "good";
+  refs.battle.odds.dataset.tone = tone;
+  refs.battle.ring.style.strokeDashoffset = String(169.6 * (1 - preview.winChance));
+  refs.battle.bar.style.width = `${Math.max(6, Math.min(94, preview.effective / (preview.effective + target.power) * 100))}%`;
+}
+
+// ---------------------------------------------------------------- goals
+function buildGoals() {
+  $("#missionList").innerHTML = missionList(state).map(m => `
+    <article class="mission" data-mission-card="${m.id}">
+      <span class="mission-icon">${icon(MISSION_ICON[m.id] || "goals")}</span>
+      <div class="mission-body">
+        <b>${m.label}</b>
+        <div class="progress"><i></i></div>
+        <div class="mission-meta"><span class="mission-prog"></span><span class="reward-list">${rewardChips(m.reward)}</span></div>
+      </div>
+      <button class="btn mission-btn" data-mission="${m.id}"><span class="btn-main"></span></button>
+    </article>`).join("");
+  for (const m of missionList(state)) {
+    const el = $(`[data-mission-card="${m.id}"]`);
+    refs.missions[m.id] = { el, bar: $(".progress i", el), prog: $(".mission-prog", el), btn: $(".mission-btn", el), label: $(".mission-btn .btn-main", el) };
+  }
+  $("#prestigeCard").innerHTML = `
+    <div class="galaxy" aria-hidden="true"><i></i><i></i><b></b></div>
+    <div class="prestige-copy">
+      <p>基地・艦隊・征服状況をリセットし、恒久ボーナスの<strong>覇王星</strong>を獲得。星1個ごとに資源生産 <strong>+8%</strong>、艦隊戦力 <strong>+3.5%</strong>。</p>
+    </div>
+    <div class="prestige-stats">
+      <div><b data-p="count">0</b><small>超越回数</small></div>
+      <div><b data-p="best">0/6</b><small>最高制圧</small></div>
+      <div class="gain">${starIcon()}<b data-p="gain">+4</b><small>次回獲得</small></div>
+    </div>
+    <div class="prestige-reqs">
+      <span data-p="req-sector">${icon("flag")}王冠ゲートまで制圧 (5星域)</span>
+      <span data-p="req-cmd">${icon("base")}司令中枢 Lv.7</span>
+    </div>
+    <button class="btn btn-purple prestige-btn" data-prestige-open>${icon("galaxy")}<span class="btn-main" data-p="label">超越する</span></button>`;
+  refs.prestige = Object.fromEntries($$("[data-p]", $("#prestigeCard")).map(el => [el.dataset.p, el]));
+  refs.prestige.btn = $(".prestige-btn");
+}
+
+function updateGoals() {
+  for (const m of missionList(state)) {
+    const r = refs.missions[m.id];
     const claimed = state.missionClaims.includes(m.id);
     const done = m.progress >= m.goal;
     const p = Math.min(100, m.progress / m.goal * 100);
-    return `<article class="mission"><div><b>${m.label}</b><span class="mission-reward">報酬 ${formatCost(m.reward)}</span><div class="progress-track"><i style="width:${p}%"></i></div></div>
-      <button class="claim-btn" data-mission="${m.id}" ${!done || claimed ? "disabled" : ""}>${claimed ? "受取済" : done ? "受取" : `${Math.floor(p)}%`}</button></article>`;
-  }).join("");
+    r.bar.style.transform = `scaleX(${p / 100})`;
+    setText(r.prog, `${fmtInt(Math.min(m.goal, Math.floor(m.progress)))} / ${fmtInt(m.goal)}`);
+    setText(r.label, claimed ? "受取済" : done ? "受け取る" : `${Math.floor(p)}%`);
+    setClass(r.el, "ready", done && !claimed);
+    setClass(r.el, "claimed", claimed);
+    setClass(r.btn, "btn-gold", done && !claimed);
+    if (r.btn.disabled !== (!done || claimed)) r.btn.disabled = !done || claimed;
+  }
   const ready = canPrestige(state);
-  const stars = Math.max(4, availablePrestigeStars(state));
-  $("#prestigeCard").innerHTML = `<h3>銀河超越</h3><p>基地・艦隊・征服状況をリセットし、恒久ボーナスの<strong>覇王星</strong>を獲得。星1個ごとに資源生産+8%、艦隊戦力+3.5%。</p>
-    <div class="prestige-stats"><div class="prestige-stat"><b>${state.prestige.count}</b><small>超越回数</small></div><div class="prestige-stat"><b>${state.prestige.bestTerritories}/6</b><small>最高制圧</small></div><div class="prestige-stat"><b>+${stars}</b><small>次回獲得</small></div></div>
-    <button class="prestige-btn" data-prestige-open ${ready ? "" : "disabled"}>${ready ? `超越して ★${stars} 獲得` : "王冠ゲートまで制圧 + 司令Lv7で解禁"}</button>`;
+  const p = refs.prestige;
+  setText(p.count, String(state.prestige.count));
+  setText(p.best, `${state.prestige.bestTerritories}/6`);
+  setText(p.gain, `+${Math.max(4, availablePrestigeStars(state))}`);
+  setClass(p["req-sector"], "met", state.conquered.length >= 5);
+  setClass(p["req-cmd"], "met", state.buildings.command >= 7);
+  setText(p.label, ready ? `超越して ★${Math.max(4, availablePrestigeStars(state))} 獲得` : "条件未達成");
+  if (p.btn.disabled !== !ready) p.btn.disabled = !ready;
+  setClass($("#prestigeCard"), "ready", ready);
 }
 
-function renderAll() {
-  renderResources(); renderCommandScene(); renderMap(); renderGoals();
+function updateBadges() {
+  const claimable = missionList(state).some(m => m.progress >= m.goal && !state.missionClaims.includes(m.id)) || canPrestige(state);
+  setClass($("#goalBadge"), "hidden", !claimable);
+  const target = targetTerritory(state);
+  const odds = target ? battlePreview(state, target).winChance : 0;
+  setClass($("#mapBadge"), "hidden", !target || odds * 100 < 57.5);
+}
+
+// ---------------------------------------------------------------- refresh
+function refreshActive() {
+  updateHudSlow();
+  if (activePanel === "base") { updateBaseScene(); renderDetail(); }
+  else if (activePanel === "map") renderMap();
+  else updateGoals();
+  updateBadges();
+}
+
+function afterAction() {
   const unlocks = checkAchievements(state);
-  if (unlocks.length) {
-    for (const a of unlocks) toast(`実績「${a.name}」解除！ ★${a.reward}`);
-    burst(window.innerWidth * .5, window.innerHeight * .35, 35, "gold");
-    sound("win");
+  for (const a of unlocks) {
+    toast(`実績「${a.name}」解除`, { icon: "star", tone: "gold", sub: `覇王星 +${a.reward}` });
+    bump($("#starPill"));
+  }
+  if (unlocks.length) { sfx("claim"); burst(innerWidth * .5, innerHeight * .3, 40, "gold", { ring: true }); }
+  refreshActive();
+  queueSave();
+}
+
+let saveTimer = null;
+function queueSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveState, 400);
+}
+
+// ---------------------------------------------------------------- toasts & modal
+function toast(message, { icon: ico = "check", tone = "cyan", sub = "" } = {}) {
+  const layer = $("#toastLayer");
+  while (layer.children.length >= 3) layer.firstElementChild.remove();
+  const el = document.createElement("div");
+  el.className = `toast tone-${tone}`;
+  el.innerHTML = `<span class="toast-ico">${ico === "star" ? starIcon() : icon(ico)}</span><span class="toast-txt"><b>${h(message)}</b>${sub ? `<small>${h(sub)}</small>` : ""}</span>`;
+  layer.append(el);
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 260); }, 2400);
+}
+
+let modalTimer = null;
+function showModal(html, cls = "") {
+  clearTimeout(modalTimer);
+  $("#modalBody").innerHTML = html;
+  $("#modal").className = `modal ${cls}`;
+}
+
+function closeModal() {
+  const modal = $("#modal");
+  if (modal.classList.contains("hidden")) return;
+  modal.classList.add("closing");
+  modalTimer = setTimeout(() => { modal.className = "modal hidden"; }, reducedMotion() ? 0 : 180);
+  if (welcomeGains) {
+    const gains = welcomeGains;
+    welcomeGains = null;
+    for (const k of RESOURCE_KEYS) hold[k] = Math.max(0, hold[k] - gains[k]);
+    flyGains({ x: innerWidth / 2, y: innerHeight / 2 }, gains);
   }
 }
 
-function floatGain(text) {
-  const layer = $("#floatingLayer");
-  const el = document.createElement("span");
-  el.className = "float-gain"; el.textContent = text;
-  el.style.left = `${18 + Math.random() * 24}%`;
-  layer.append(el); setTimeout(() => el.remove(), 950);
+// Offline gains are already in state; hold them back in the HUD until the player collects them.
+let welcomeGains = null;
+const WELCOME_MODAL_SECONDS = 120;
+function prepareWelcome() {
+  if (!welcome || welcome.seconds < WELCOME_MODAL_SECONDS) return;
+  for (const k of RESOURCE_KEYS) hold[k] += welcome.gains[k];
+  welcomeGains = Object.fromEntries(RESOURCE_KEYS.map(k => [k, (welcomeGains?.[k] || 0) + welcome.gains[k]]));
 }
 
-function switchPanel(name) {
-  $$(".panel").forEach(p => p.classList.toggle("active", p.id === `panel-${name}`));
-  $$(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.panel === name));
-  window.scrollTo({ top: 0, behavior: state.settings.reducedMotion ? "auto" : "smooth" });
-  sound("tap");
+function showWelcome() {
+  if (!welcome) return;
+  const { seconds } = welcome;
+  welcome = null;
+  if (seconds < WELCOME_MODAL_SECONDS) { if (seconds >= 30) toast(`${formatDuration(seconds)}分の生産を回収`, { icon: "clock" }); return; }
+  const gains = welcomeGains;
+  showModal(`
+    <div class="welcome">
+      <span class="kicker">WELCOME BACK</span>
+      <h2>おかえりなさい、司令官</h2>
+      <p>不在の <b>${formatDuration(seconds)}</b> も基地は稼働を続けていました。</p>
+      <div class="welcome-grid">${RESOURCE_KEYS.map(k => `<div class="welcome-item">${resourceIcon(k)}<b>+${compactNumber(gains[k])}</b><small>${RESOURCE_META[k].name}</small></div>`).join("")}</div>
+      <button class="btn btn-gold btn-wide" data-close-modal><span class="btn-main">受け取る</span></button>
+    </div>`, "center");
+}
+
+function showHelp() {
+  showModal(`
+    <div class="help">
+      <span class="kicker">FIELD MANUAL</span>
+      <h2>遊び方</h2>
+      <ol class="howto">
+        <li><b>${icon("base")}基地を育てる</b><span>施設や艦隊を直接タップして強化・建造。ボタン長押しで連続実行。<em>↑</em>マークは今すぐ強化できる印です。</span></li>
+        <li><b>${icon("bolt")}資源サージ</b><span>右下のサージで数十秒分の生産を即回収。序盤の加速に。</span></li>
+        <li><b>${icon("fleet")}艦隊編成</b><span>3兵種には得意分野があり、星域ごとに有利な編成が変わります。</span></li>
+        <li><b>${icon("map")}星域征服</b><span>勝率を見て出撃。勝つと恒久的な生産ボーナスと報酬を獲得。</span></li>
+        <li><b>${icon("galaxy")}銀河超越</b><span>終盤に覇王星を得てニューゲーム。周回ごとに成長が加速。</span></li>
+      </ol>
+      <p class="note">進行は端末内に自動保存され、最大8時間分のオフライン生産を回収できます。</p>
+      <div class="settings">
+        <button class="setting" data-toggle="sound"><span>${icon("sound")}サウンド</span><i class="switch ${state.settings.sound ? "on" : ""}"></i></button>
+        <button class="setting" data-toggle="motion"><span>${icon("galaxy")}演出を減らす</span><i class="switch ${state.settings.reducedMotion ? "on" : ""}"></i></button>
+      </div>
+      <button class="btn btn-ghost btn-wide danger" data-reset-open>${icon("reset")}<span class="btn-main">最初からやり直す</span></button>
+    </div>`);
 }
 
 function openResetModal() {
-  showModal(`<h2>最初からやり直す？</h2><p>このゲームのセーブデータだけを削除し、資源・施設・艦隊・征服・実績・超越回数をすべて初期状態に戻します。この操作は元に戻せません。</p><button class="danger-btn" data-reset-confirm>セーブデータを削除して最初から</button>`);
+  showModal(`<div class="confirm"><span class="kicker danger">DATA RESET</span><h2>最初からやり直す？</h2><p>このゲームのセーブデータだけを削除し、資源・施設・艦隊・征服・実績・超越回数をすべて初期状態に戻します。<b>この操作は元に戻せません。</b></p><div class="confirm-row"><button class="btn btn-ghost" data-close-modal><span class="btn-main">キャンセル</span></button><button class="btn btn-danger" data-reset-confirm><span class="btn-main">削除して最初から</span></button></div></div>`, "center");
 }
 
 function confirmReset() {
-  if (resetInProgress) return;
-  resetInProgress = true;
+  if (resetting) return;
+  resetting = true;
   localStorage.removeItem(SAVE_KEY);
   location.reload();
 }
 
+let prestigeInProgress = false;
 function openPrestigeModal() {
   if (prestigeInProgress || !canPrestige(state)) return;
-  showModal(`<h2>銀河超越を実行？</h2><p>基地・資源・艦隊・征服状況は初期化されます。実績と覇王星は保持され、次周はより高速に成長します。</p><button id="confirmPrestige" class="prestige-btn" data-prestige-confirm>超越を確定</button>`);
+  const stars = Math.max(4, availablePrestigeStars(state));
+  showModal(`<div class="confirm"><div class="galaxy small" aria-hidden="true"><i></i><i></i><b></b></div><span class="kicker">ASCENSION</span><h2>銀河超越を実行？</h2><p>基地・資源・艦隊・征服状況は初期化されます。実績と覇王星は保持され、次周はより高速に成長します。</p><div class="ascend-gain">${starIcon()}<b>+${stars}</b><small>覇王星</small></div><div class="confirm-row"><button class="btn btn-ghost" data-close-modal><span class="btn-main">やめる</span></button><button id="confirmPrestige" class="btn btn-purple" data-prestige-confirm><span class="btn-main">超越を確定</span></button></div></div>`, "center");
 }
 
 function confirmPrestige() {
   if (prestigeInProgress || !canPrestige(state)) return;
-
   prestigeInProgress = true;
   const confirmButton = $("#confirmPrestige");
   if (confirmButton) confirmButton.disabled = true;
-
   const result = prestige(state);
-  if (!result.ok) {
-    prestigeInProgress = false;
-    return;
-  }
-
+  if (!result.ok) { prestigeInProgress = false; return; }
   closeModal();
-  burst(innerWidth * .5, innerHeight * .5, 80, "purple");
-  sound("win");
-  toast(`超越成功！ 覇王星 +${result.earned}`);
-  saveState();
-  renderAll();
-  switchPanel("base");
+  for (const k of RESOURCE_KEYS) { hold[k] = 0; shown[k] = state.resources[k]; }
+  document.body.classList.add("ascend-flash");
+  setTimeout(() => document.body.classList.remove("ascend-flash"), 900);
+  burst(innerWidth * .5, innerHeight * .5, 120, "purple", { speed: 1.4, ring: true });
+  sfx("prestige"); haptic([30, 40, 60]);
+  toast(`超越成功！ 覇王星 +${result.earned}`, { icon: "star", tone: "purple" });
+  selected = { type: "building", key: "command" };
+  fresh.clear();
+  detailKey = ""; mapKey = ""; battleKey = "";
+  switchPanel("base", true);
+  afterAction();
   prestigeInProgress = false;
 }
-function handleClick(e) {
-  const sceneBuilding = e.target.closest("[data-scene-building]");
-  if (sceneBuilding) {
-    selectedCommandTarget = { type: "building", key: sceneBuilding.dataset.sceneBuilding };
-    sound("tap"); haptic(8); renderCommandScene();
-    return;
+
+// ---------------------------------------------------------------- actions
+function nodeFor(type, key) { return type === "unit" ? refs.fleets[key]?.el : refs.facilities[key]?.el; }
+
+function doAction(btn, repeat = false) {
+  const type = btn.dataset.action === "recruit" ? "unit" : "building";
+  const key = btn.dataset.key;
+  const def = type === "unit" ? UNITS[key] : BUILDINGS[key];
+  const beforeLevel = state.buildings.command;
+  const result = type === "unit" ? recruitUnit(state, key) : upgradeBuilding(state, key);
+  if (!result.ok) {
+    if (!repeat) {
+      sfx("deny"); haptic(8);
+      if (!reducedMotion()) btn.animate([{ transform: "translateX(0)" }, { transform: "translateX(-5px)" }, { transform: "translateX(5px)" }, { transform: "translateX(-3px)" }, { transform: "translateX(0)" }], { duration: 260 });
+      if (result.reason === "locked") toast(`司令中枢 Lv.${def.unlock.command} で解禁`, { icon: "lock", tone: "red" });
+      else toast("資源が不足しています", { icon: "clock", tone: "red", sub: `あと ${formatClock(etaFor(result.cost))} で準備完了` });
+    }
+    return false;
   }
-
-  const sceneUnit = e.target.closest("[data-scene-unit]");
-  if (sceneUnit) {
-    selectedCommandTarget = { type: "unit", key: sceneUnit.dataset.sceneUnit };
-    sound("tap"); haptic(8); renderCommandScene();
-    return;
+  fresh.delete(key);
+  const node = nodeFor(type, key);
+  const art = node?.querySelector(type === "unit" ? ".formation" : ".facility-art-wrap");
+  if (type === "unit") {
+    sfx("build"); haptic(10);
+    burstAt(art, repeat ? 6 : 12, "cyan");
+    floatText(node, `+1`, "cyan");
+  } else {
+    const level = state.buildings[key];
+    const tierUp = facilityTier(level) !== facilityTier(level - 1);
+    sfx("upgrade"); haptic(tierUp ? [20, 30, 40] : 16);
+    burstAt(art, tierUp ? 44 : 22, tierUp ? "gold" : "green", { ring: true });
+    floatText(node, `Lv.${level}`, tierUp ? "gold" : "green");
+    if (node && !reducedMotion()) node.querySelector(".facility-art-wrap").animate([{ transform: "scale(1)" }, { transform: "scale(1.12) translateY(-4px)" }, { transform: "scale(.97)" }, { transform: "scale(1)" }], { duration: 420, easing: "cubic-bezier(.3,1.6,.5,1)" });
+    if (tierUp && level > 1) toast(`${def.name} が ${TIER_NAME[facilityTier(level)]} に進化！`, { icon: "up", tone: "gold" });
+    else if (level === 1) toast(`${def.name} 建設完了`, { icon: "build", tone: "green" });
+    if (key === "command" && state.buildings.command > beforeLevel) announceUnlocks(state.buildings.command);
   }
-
-  const upgrade = e.target.closest("[data-upgrade-building]");
-  if (upgrade) {
-    const key = upgrade.dataset.upgradeBuilding;
-    const result = upgradeBuilding(state, key);
-    if (result.ok) { sound("upgrade"); haptic(); burstAt(upgrade, 14); toast(`${BUILDINGS[key].name} Lv.${state.buildings[key]}！`); renderAll(); saveState(); }
-    return;
-  }
-
-  const recruit = e.target.closest("[data-recruit-unit]");
-  if (recruit) {
-    const key = recruit.dataset.recruitUnit;
-    const result = recruitUnit(state, key);
-    if (result.ok) { sound("upgrade"); haptic(12); burstAt(recruit, 10); renderAll(); saveState(); }
-    return;
-  }
-
-  const resetConfirm = e.target.closest("[data-reset-confirm]");
-  if (resetConfirm) { confirmReset(); return; }
-
-  const resetOpen = e.target.closest("[data-reset-open]");
-  if (resetOpen) { openResetModal(); return; }
-
-  const prestigeConfirm = e.target.closest("[data-prestige-confirm]");
-  if (prestigeConfirm) { confirmPrestige(); return; }
-
-  const prestigeOpen = e.target.closest("[data-prestige-open]");
-  if (prestigeOpen) { openPrestigeModal(); return; }
-
-  const mission = e.target.closest("[data-mission]");
-  if (mission) {
-    const result = claimMission(state, mission.dataset.mission);
-    if (result.ok) { sound("win"); burstAt(mission, 22, "gold"); toast(`ミッション報酬 ${formatCost(result.mission.reward)}`); renderAll(); }
-    return;
-  }
-  const battle = e.target.closest("[data-battle]");
-  if (battle) { playBattle(battle.dataset.battle); return; }
-  const nav = e.target.closest("[data-panel]"); if (nav) switchPanel(nav.dataset.panel);
+  afterAction();
+  return true;
 }
+
+function announceUnlocks(level) {
+  const items = [...Object.entries(BUILDINGS).map(([k, d]) => [k, d]), ...Object.entries(UNITS).map(([k, d]) => [k, d])].filter(([, d]) => d.unlock?.command === level);
+  if (!items.length) return;
+  items.forEach(([k]) => fresh.add(k));
+  setTimeout(() => { sfx("unlock"); toast(`新たに解禁: ${items.map(([, d]) => d.name).join("・")}`, { icon: "gift", tone: "purple" }); }, 250);
+}
+
+function floatText(node, text, tone) {
+  if (!node || reducedMotion()) return;
+  const r = node.getBoundingClientRect();
+  const el = document.createElement("div");
+  el.className = `float-text tone-${tone}`;
+  el.textContent = text;
+  el.style.left = `${r.left + r.width / 2}px`;
+  el.style.top = `${r.top + r.height * .3}px`;
+  $("#flyLayer").append(el);
+  el.animate([{ transform: "translate(-50%,0) scale(.6)", opacity: 0 }, { transform: "translate(-50%,-18px) scale(1.15)", opacity: 1, offset: .25 }, { transform: "translate(-50%,-46px) scale(1)", opacity: 0 }], { duration: 900, easing: "ease-out" }).onfinish = () => el.remove();
+}
+
+function doSurge(btn) {
+  const gains = surge(state);
+  sfx("surge"); haptic(14);
+  burstAt(btn, 26, "cyan", { ring: true });
+  if (!reducedMotion()) btn.animate([{ transform: "scale(1)" }, { transform: "scale(.9)" }, { transform: "scale(1.06)" }, { transform: "scale(1)" }], { duration: 320, easing: "ease-out" });
+  flyGains(btn, gains);
+  afterAction();
+}
+
+function doClaim(btn) {
+  const result = claimMission(state, btn.dataset.mission);
+  if (!result.ok) return;
+  sfx("claim"); haptic([15, 30, 15]);
+  burstAt(btn, 30, "gold", { ring: true });
+  flyGains(btn, result.mission.reward);
+  toast(`ミッション達成: ${result.mission.label}`, { icon: "gift", tone: "gold" });
+  afterAction();
+}
+
+// ---------------------------------------------------------------- battle cinematic
+let battleTimers = [];
+let battleResult = null;
 
 function playBattle(id) {
-  const btn = $(`[data-battle="${id}"]`); if (btn) btn.disabled = true;
-  document.body.classList.add("battle-flash"); haptic([30, 45, 40]); sound("upgrade");
-  setTimeout(() => {
-    const result = resolveBattle(state, id);
-    document.body.classList.remove("battle-flash");
-    if (!result.ok) return;
-    if (result.win) {
-      sound("win"); haptic([40, 30, 70]); burst(window.innerWidth * .5, window.innerHeight * .45, 55, "gold");
-      toast(`制圧成功！ ${result.territory.name} + ${formatCost(result.reward)}`);
-    } else {
-      sound("fail"); haptic(100); toast(`撤退… 戦力を増強して再挑戦！`);
-    }
-    renderAll(); saveState();
-  }, 430);
+  if (busy) return;
+  const target = TERRITORIES.find(t => t.id === id);
+  const before = { ...state.units };
+  const result = resolveBattle(state, id);
+  if (!result.ok) return;
+  busy = true;
+  if (result.win) for (const [k, v] of Object.entries(result.reward)) hold[k] += v;
+  saveState();
+  battleResult = { result, target, before };
+  const overlay = $("#battleOverlay");
+  const fleetKinds = Object.keys(UNITS).filter(k => before[k] > 0);
+  const ships = (fleetKinds.length ? fleetKinds : ["striker"]).flatMap(k => Array.from({ length: Math.min(3, Math.max(1, Math.ceil(before[k] / 4))) }, () => k)).slice(0, 7);
+  overlay.innerHTML = `
+    <div class="bo-bg"></div>
+    <div class="bo-stage">
+      <div class="bo-enemy">${planetArt(target.type, "bo-planet")}${["striker", "guardian", "striker"].map((k, i) => `<span class="bo-eship" style="--i:${i}">${shipArt(k, { enemy: true })}</span>`).join("")}</div>
+      <div class="bo-fleet">${ships.map((k, i) => `<span class="bo-ship" style="--i:${i};left:${[40, 20, 20, 60, 60, 0, 0][i]}%;top:${[36, 8, 64, 16, 58, 36, 88][i]}%">${shipArt(k)}</span>`).join("")}</div>
+      <div class="bo-lasers"></div>
+      <div class="bo-caption"><span class="kicker">SECTOR ${TERRITORIES.indexOf(target) + 1}</span><b>${h(target.name)}</b><small>VS ${h(target.enemy)}</small></div>
+    </div>
+    <div class="bo-result"></div>
+    <div class="bo-skip">タップでスキップ</div>`;
+  overlay.className = "battle-overlay phase-in";
+  sfx("launch"); haptic([30, 45, 40]);
+  const fast = reducedMotion();
+  const at = (ms, fn) => battleTimers.push(setTimeout(fn, fast ? 0 : ms));
+  if (!fast) {
+    at(520, () => overlay.classList.add("phase-fire"));
+    for (let i = 0; i < 9; i += 1) at(560 + i * 95, () => fireLaser(overlay, i));
+    for (let i = 0; i < 4; i += 1) at(760 + i * 190, () => { const p = $(".bo-planet", overlay)?.getBoundingClientRect(); if (p) burst(p.left + p.width * (.3 + Math.random() * .4), p.top + p.height * (.3 + Math.random() * .4), 16, result.win ? "gold" : "red"); sfx("boom"); });
+  }
+  at(1650, showBattleResult);
 }
+
+function fireLaser(overlay, i) {
+  const layer = $(".bo-lasers", overlay);
+  const ships = $$(".bo-ship", overlay);
+  const planet = $(".bo-planet", overlay);
+  if (!layer || !ships.length || !planet) return;
+  const s = ships[i % ships.length].getBoundingClientRect();
+  const p = planet.getBoundingClientRect();
+  const x1 = s.right - 6, y1 = s.top + s.height / 2;
+  const x2 = p.left + p.width * (.35 + Math.random() * .3), y2 = p.top + p.height * (.35 + Math.random() * .3);
+  const len = Math.hypot(x2 - x1, y2 - y1), ang = Math.atan2(y2 - y1, x2 - x1);
+  const beam = document.createElement("i");
+  beam.className = "bo-laser";
+  beam.style.cssText = `left:${x1}px;top:${y1}px;width:${len}px;transform:rotate(${ang}rad)`;
+  layer.append(beam);
+  setTimeout(() => beam.remove(), 260);
+  sfx("laser");
+}
+
+function showBattleResult() {
+  if (!battleResult || battleResult.shown) return;
+  battleResult.shown = true;
+  battleTimers.forEach(clearTimeout); battleTimers = [];
+  const { result, target } = battleResult;
+  const overlay = $("#battleOverlay");
+  overlay.classList.add("phase-result", result.win ? "win" : "lose");
+  const box = $(".bo-result", overlay);
+  if (result.win) {
+    box.innerHTML = `
+      <div class="result-rays"></div>
+      <div class="result-title">VICTORY</div>
+      <div class="result-sub">${h(target.name)} を制圧！</div>
+      <div class="result-card">
+        <small>獲得報酬</small><div class="reward-list big">${rewardChips(result.reward)}</div>
+        <span class="bonus-tag">${icon("trend")}恒久ボーナス ${bonusText(target.bonus)}</span>
+        ${state.battle.streak > 1 ? `<span class="streak-tag">${state.battle.streak}連勝中！</span>` : ""}
+      </div>
+      <button class="btn btn-gold btn-wide" data-battle-close><span class="btn-main">受け取る</span></button>`;
+    sfx("victory"); haptic([40, 30, 70]);
+    burst(innerWidth / 2, innerHeight * .34, 70, "gold", { speed: 1.3, ring: true });
+  } else {
+    const lost = Object.entries(result.casualties).filter(([, v]) => v > 0);
+    box.innerHTML = `
+      <div class="result-title">DEFEAT</div>
+      <div class="result-sub">撤退… ${h(target.enemy)} の防衛線は厚い</div>
+      <div class="result-card">
+        <small>損害</small>
+        <div class="loss-list">${lost.length ? lost.map(([k, v]) => `<span>${shipArt(k)}<b>${UNITS[k].name}</b><em>-${v}</em></span>`).join("") : `<span class="none">艦隊の損害なし</span>`}</div>
+        <p class="tip">${icon("up")}艦隊を増強し、有利な兵種を揃えて再挑戦しよう</p>
+      </div>
+      <button class="btn btn-ghost btn-wide" data-battle-close><span class="btn-main">基地に帰還</span></button>`;
+    sfx("defeat"); haptic(90);
+  }
+}
+
+function closeBattle() {
+  if (!battleResult?.shown) return;
+  const { result } = battleResult;
+  const overlay = $("#battleOverlay");
+  const from = $(".reward-list", overlay)?.getBoundingClientRect();
+  overlay.classList.add("closing");
+  setTimeout(() => { overlay.className = "battle-overlay hidden"; overlay.innerHTML = ""; }, reducedMotion() ? 0 : 220);
+  if (result.win) {
+    for (const [k, v] of Object.entries(result.reward)) hold[k] = Math.max(0, hold[k] - v);
+    flyGains(from ? { x: from.left + from.width / 2, y: from.top + from.height / 2 } : { x: innerWidth / 2, y: innerHeight / 2 }, result.reward);
+    setTimeout(() => { const n = $(`[data-territory="${result.territory.id}"]`); burstAt(n, 30, "cyan", { ring: true }); }, 260);
+  }
+  battleResult = null;
+  busy = false;
+  afterAction();
+}
+
+// ---------------------------------------------------------------- navigation
+function switchPanel(name, silent = false) {
+  if (!["base", "map", "goals"].includes(name)) return;
+  const changed = name !== activePanel;
+  activePanel = name;
+  $$(".panel").forEach(p => setClass(p, "active", p.id === `panel-${name}`));
+  const tabs = $$(".tab");
+  tabs.forEach(b => setClass(b, "active", b.dataset.panel === name));
+  $(".tabbar").style.setProperty("--tab", String(tabs.findIndex(b => b.dataset.panel === name)));
+  if (changed && !silent) { sfx("tab"); haptic(6); }
+  refreshActive();
+}
+
+// ---------------------------------------------------------------- input
+let holdTimer = null;
+let holdFired = false;
+
+function clearHold() {
+  clearTimeout(holdTimer); holdTimer = null;
+  document.querySelectorAll(".action-btn.holding").forEach(b => b.classList.remove("holding"));
+}
+
+function onPointerDown(e) {
+  unlockAudio();
+  const btn = e.target.closest(".action-btn");
+  if (!btn || btn.classList.contains("btn-locked")) return;
+  holdFired = false;
+  clearHold();
+  holdTimer = setTimeout(function step(delay = 170) {
+    btn.classList.add("holding");
+    if (!doAction(btn, true)) { clearHold(); return; }
+    holdFired = true;
+    holdTimer = setTimeout(() => step(Math.max(60, delay * .86)), delay);
+  }, 380);
+}
+
+function onPointerUp() {
+  if (holdFired) suppressClick = true;
+  clearHold();
+}
+
+function handleClick(e) {
+  const t = e.target;
+  if (suppressClick) { suppressClick = false; if (t.closest(".action-btn")) return; }
+
+  if ($("#battleOverlay").contains(t)) {
+    if (t.closest("[data-battle-close]")) closeBattle();
+    else if (battleResult && !battleResult.shown) showBattleResult();
+    return;
+  }
+
+  const facility = t.closest("[data-facility]");
+  if (facility) {
+    const key = facility.dataset.facility;
+    if (selected.type === "building" && selected.key === key) { const btn = $(".action-btn"); if (btn && !reducedMotion()) btn.animate([{ transform: "scale(1)" }, { transform: "scale(1.06)" }, { transform: "scale(1)" }], { duration: 220 }); }
+    selected = { type: "building", key };
+    fresh.delete(key);
+    sfx("select"); haptic(6);
+    refreshActive();
+    return;
+  }
+  const unit = t.closest("[data-unit]");
+  if (unit) {
+    selected = { type: "unit", key: unit.dataset.unit };
+    fresh.delete(unit.dataset.unit);
+    sfx("select"); haptic(6);
+    refreshActive();
+    return;
+  }
+
+  const action = t.closest(".action-btn");
+  if (action) { doAction(action); return; }
+  if (t.closest("#surgeBtn")) { doSurge($("#surgeBtn")); return; }
+
+  if (t.closest("[data-reset-confirm]")) { confirmReset(); return; }
+  if (t.closest("[data-reset-open]")) { openResetModal(); return; }
+  if (t.closest("[data-prestige-confirm]")) { confirmPrestige(); return; }
+  if (t.closest("[data-prestige-open]")) { openPrestigeModal(); return; }
+  if (t.closest("[data-close-modal]")) { closeModal(); return; }
+
+  const toggle = t.closest("[data-toggle]");
+  if (toggle) {
+    if (toggle.dataset.toggle === "sound") { state.settings.sound = !state.settings.sound; syncSoundButton(); }
+    else { state.settings.reducedMotion = !state.settings.reducedMotion; syncMotion(); }
+    setClass($(".switch", toggle), "on", toggle.dataset.toggle === "sound" ? state.settings.sound : state.settings.reducedMotion);
+    sfx("tap"); saveState();
+    return;
+  }
+
+  const mission = t.closest("[data-mission]");
+  if (mission) { doClaim(mission); return; }
+
+  const battle = t.closest("[data-battle]");
+  if (battle) { playBattle(battle.dataset.battle); return; }
+
+  const territory = t.closest("[data-territory]");
+  if (territory) {
+    const tt = TERRITORIES.find(x => x.id === territory.dataset.territory);
+    if (state.conquered.includes(tt.id)) toast(`${tt.name}（制圧済）`, { icon: "flag", sub: `恒久ボーナス ${bonusText(tt.bonus)}` });
+    else if (targetTerritory(state)?.id === tt.id) { sfx("select"); const b = $(".battle-btn"); if (b && !reducedMotion()) b.animate([{ transform: "scale(1)" }, { transform: "scale(1.06)" }, { transform: "scale(1)" }], { duration: 240 }); }
+    else toast(`${tt.name}`, { icon: "lock", tone: "red", sub: "手前の星域を先に制圧しよう" });
+    return;
+  }
+
+  const go = t.closest("[data-goto]");
+  if (go) { switchPanel(go.dataset.goto); return; }
+
+  const nav = t.closest("[data-panel]");
+  if (nav) switchPanel(nav.dataset.panel);
+}
+
+function syncSoundButton() {
+  setSoundEnabled(state.settings.sound);
+  const btn = $("#soundBtn");
+  btn.dataset.muted = state.settings.sound ? "false" : "true";
+  btn.setAttribute("aria-label", state.settings.sound ? "サウンドをオフ" : "サウンドをオン");
+}
+
+function syncMotion() { document.body.classList.toggle("reduce-motion", !!state.settings.reducedMotion); }
 
 function setupEvents() {
   document.addEventListener("click", handleClick);
-  $("#surgeBtn").addEventListener("click", e => {
-    const gains = surge(state); sound("upgrade"); haptic(18); burstAt(e.currentTarget, 18);
-    floatGain(`+${compactNumber(Object.values(gains).reduce((a,b)=>a+b,0))}`); renderResources(); renderCommandScene(); renderGoals();
-  });
-  $("#soundBtn").addEventListener("click", () => {
-    state.settings.sound = !state.settings.sound;
-    $("#soundBtn").dataset.muted = state.settings.sound ? "false" : "true";
-    $("#soundBtn").setAttribute("aria-label", state.settings.sound ? "サウンドをオフ" : "サウンドをオン");
-    saveState();
-  });
-  $("#helpBtn").addEventListener("click", () => showModal(`<h2>遊び方</h2><p><strong>1. 司令基地を操作</strong><br>基地画面の施設や艦隊を直接タップすると、下に強化・建造パネルが表示されます。資源サージで序盤を加速できます。</p><p><strong>2. 艦隊を増強</strong><br>3兵種には得意分野があり、建造するほど基地上の艦影も増えます。</p><p><strong>3. 星域を順番に征服</strong><br>後半ほど敵戦力が大きく伸びます。勝率を見ながら艦隊を増強して進軍しましょう。</p><p><strong>4. 超越で周回</strong><br>終盤まで進めると覇王星を獲得してニューゲーム。恒久倍率で次周はさらに高速化。</p><p>進行状況は端末内に自動保存され、最大8時間分のオフライン生産を回収できます。</p><hr class="modal-divider"><h3>データ管理</h3><p>完全に最初から遊び直す場合は、下のボタンからこのゲームのセーブだけを削除できます。</p><button class="danger-btn" data-reset-open>最初からやり直す</button>`));
+  document.addEventListener("pointerdown", onPointerDown, { passive: true });
+  for (const ev of ["pointerup", "pointercancel"]) document.addEventListener(ev, onPointerUp, { passive: true });
+  document.addEventListener("contextmenu", e => { if (e.target.closest("button")) e.preventDefault(); });
+  $("#soundBtn").addEventListener("click", () => { state.settings.sound = !state.settings.sound; syncSoundButton(); if (state.settings.sound) sfx("select"); saveState(); });
+  $("#helpBtn").addEventListener("click", () => { sfx("tap"); showHelp(); });
   $("#modalClose").addEventListener("click", closeModal);
   $("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) saveState(); else { const now=Date.now(); const sec=(now-state.lastSeenAt)/1000; if(sec>3){tick(state,sec);toast(`${formatDuration(sec)}ぶん生産！`);renderAll();} state.lastSeenAt=now; } });
-  window.addEventListener("beforeunload", saveState);
-  window.addEventListener("resize", resizeCanvas);
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { if (battleResult?.shown) closeBattle(); else closeModal(); } });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { saveState(); clearHold(); return; }
+    const sec = (Date.now() - state.lastSeenAt) / 1000;
+    if (sec > 3) {
+      welcome = collectOffline(state, Math.min(sec, OFFLINE_CAP));
+      prepareWelcome();
+      showWelcome();
+      refreshActive();
+    }
+    state.lastSeenAt = Date.now();
+  });
+  addEventListener("pagehide", saveState);
+  addEventListener("beforeunload", saveState);
 }
 
-const canvas = $("#fxCanvas");
-const ctx = canvas.getContext("2d");
-let particles = [];
-function resizeCanvas(){const dpr=Math.min(2,devicePixelRatio||1);canvas.width=innerWidth*dpr;canvas.height=innerHeight*dpr;canvas.style.width=`${innerWidth}px`;canvas.style.height=`${innerHeight}px`;ctx.setTransform(dpr,0,0,dpr,0,0)}
-function burstAt(el,n=12,theme="cyan"){const r=el.getBoundingClientRect();burst(r.left+r.width/2,r.top+r.height/2,n,theme)}
-function burst(x,y,n=20,theme="cyan"){
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches || state.settings.reducedMotion) return;
-  const palette=theme==="gold"?["#ffd85a","#fff4b4","#ff8b4d"]:theme==="purple"?["#bd7bff","#6f8cff","#ffffff"]:["#4de6ff","#5affb3","#ffffff"];
-  for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=2+Math.random()*7;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-2,life:1,size:2+Math.random()*3,color:palette[i%palette.length]})}
+// ---------------------------------------------------------------- background
+function paintStars() {
+  const make = (count, maxR, alpha) => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 512;
+    const g = c.getContext("2d");
+    for (let i = 0; i < count; i += 1) {
+      const r = Math.random() ** 3 * maxR + .35;
+      const x = Math.random() * 512, y = Math.random() * 512;
+      const hue = [200, 220, 45, 280][Math.floor(Math.random() * 4)];
+      g.fillStyle = `hsla(${hue},80%,${80 + Math.random() * 20}%,${alpha * (.4 + Math.random() * .6)})`;
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      if (r > maxR * .6) { g.fillStyle = `hsla(${hue},90%,85%,.12)`; g.beginPath(); g.arc(x, y, r * 4, 0, Math.PI * 2); g.fill(); }
+    }
+    return c.toDataURL();
+  };
+  $(".space-stars.far").style.backgroundImage = `url(${make(170, 1.1, .8)})`;
+  $(".space-stars.near").style.backgroundImage = `url(${make(46, 2, 1)})`;
 }
-function drawFx(){ctx.clearRect(0,0,innerWidth,innerHeight);particles=particles.filter(p=>p.life>0.02);for(const p of particles){p.x+=p.vx;p.y+=p.vy;p.vy+=.14;p.vx*=.985;p.life*=.955;ctx.globalAlpha=p.life;ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,p.size,p.size)}ctx.globalAlpha=1;requestAnimationFrame(drawFx)}
+
+// ---------------------------------------------------------------- loop & boot
+let lastFrame = performance.now();
+let lastUi = 0;
+let lastSave = 0;
 
 function loop(now) {
-  const dt = Math.min(.25, (now - lastFrame) / 1000); lastFrame = now;
+  const dt = Math.min(.25, (now - lastFrame) / 1000);
+  lastFrame = now;
   tick(state, dt);
-  if (now - lastRender > 420) { renderResources(); renderCommandScene(); renderMap(); renderGoals(); lastRender = now; }
+  updateHud(dt);
+  if (now - lastUi > 250) { refreshActive(); lastUi = now; }
   if (now - lastSave > 5000) { saveState(); lastSave = now; }
   requestAnimationFrame(loop);
 }
 
-resizeCanvas(); setupEvents(); renderAll(); drawFx(); requestAnimationFrame(loop);
-$("#soundBtn").dataset.muted = state.settings.sound ? "false" : "true";
-$("#soundBtn").setAttribute("aria-label", state.settings.sound ? "サウンドをオフ" : "サウンドをオン");
-if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(()=>{});
-window.__STELLAR_DOMINION_READY__ = true;
+function boot() {
+  state = loadState();
+  prepareWelcome();
+  injectDefs();
+  syncMotion();
+  paintStars();
+  initFx($("#fxCanvas"), reducedMotion);
+  buildHud();
+  buildBaseScene();
+  buildGoals();
+  setupEvents();
+  switchPanel("base", true);
+  requestAnimationFrame(loop);
+  const splash = $("#splash");
+  setTimeout(() => {
+    splash.classList.add("done");
+    setTimeout(() => splash.remove(), 600);
+    afterAction();
+    showWelcome();
+  }, reducedMotion() ? 0 : 450);
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(() => {});
+  window.__STELLAR_DOMINION_READY__ = true;
+}
+
+boot();

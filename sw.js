@@ -1,4 +1,4 @@
-const CACHE = "stellar-dominion-v5";
+const CACHE = "stellar-dominion-v6";
 const ASSETS = ["./","./index.html","./styles.css","./js/app.js","./js/game-core.js","./manifest.webmanifest","./assets/icon.svg","./assets/citadel.svg","./assets/fleet.svg"];
 self.addEventListener("install", e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener("activate", e => e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));

@@ -18,6 +18,22 @@ let lastSave = 0;
 let audioCtx = null;
 let prestigeInProgress = false;
 let resetInProgress = false;
+let selectedCommandTarget = { type: "building", key: "command" };
+
+const BUILDING_SCENE_POSITIONS = {
+  command: [50, 39],
+  extractor: [20, 25],
+  reactor: [79, 24],
+  market: [18, 66],
+  observatory: [80, 65],
+  foundry: [50, 78],
+};
+
+const UNIT_SCENE_POSITIONS = {
+  striker: [36, 55],
+  guardian: [50, 59],
+  siege: [64, 55],
+};
 
 function loadState() {
   try {
@@ -96,55 +112,95 @@ function renderResources() {
     </div>`).join("");
 }
 
-function renderBuildings() {
-  const rates = productionPerSecond(state);
-  const mult = productionMultipliers(state);
-  const avg = RESOURCE_KEYS.reduce((sum, key) => sum + mult[key], 0) / RESOURCE_KEYS.length;
-  $("#globalMultiplier").textContent = `総合 ×${avg.toFixed(2)}`;
-  $("#surgeValue").textContent = `+${30 + state.buildings.command * 2}秒分`;
-  $("#buildingList").innerHTML = Object.entries(BUILDINGS).map(([key, def]) => {
-    const unlocked = isUnlocked(state, def);
-    const level = state.buildings[key] || 0;
-    const cost = buildingCost(state, key);
-    const prodText = Object.entries(def.production).length
-      ? Object.entries(def.production).map(([r]) => `${RESOURCE_META[r].icon} ${compactNumber(rates[r])}/秒`).join(" · ")
-      : key === "foundry" ? `全生産 +${level * 18}%` : `帝国補正 +${Math.max(0, level - 1) * 5}%`;
-    const lockText = def.unlock ? `司令中枢 Lv${def.unlock.command} で解禁` : "";
-    return `<article class="building-card ${unlocked ? "" : "locked"}">
-      <div class="building-icon">${def.icon}</div>
-      <div class="building-main"><div class="building-title"><b>${def.name}</b><span class="level">Lv.${level}</span></div>
-      <p>${unlocked ? def.description : lockText}</p><span class="production">${unlocked ? prodText : "LOCKED"}</span></div>
-      <button class="upgrade-btn" data-building="${key}" ${!unlocked || !canAffordCost(cost) ? "disabled" : ""}>強化<small>${formatCost(cost)}</small></button>
-    </article>`;
-  }).join("");
-}
-
 function canAffordCost(cost) { return Object.entries(cost).every(([k, v]) => state.resources[k] >= v); }
 
-function fleetFormation(key, count) {
-  if (count <= 0) return '<div class="fleet-formation empty"><span>待機艦なし</span></div>';
-  const visible = Math.min(count, 9);
-  const ships = Array.from({ length: visible }, () => `<i class="fleet-ship fleet-ship-${key}" aria-hidden="true"></i>`).join("");
-  const overflow = count > visible ? `<b class="fleet-overflow">+${count - visible}</b>` : "";
-  return `<div class="fleet-formation" aria-label="${count}隻">${ships}${overflow}</div>`;
+function sceneShipClass(key) {
+  return `fleet-ship fleet-ship-${key}`;
 }
 
-function renderFleet() {
-  const power = fleetPower(state);
-  $("#fleetPower").textContent = `戦力 ${compactNumber(power)}`;
-  $("#unitList").innerHTML = Object.entries(UNITS).map(([key, def]) => {
+function renderFleetCluster(key, count) {
+  const visible = Math.min(count, 6);
+  const ships = Array.from({ length: visible }, (_, index) =>
+    `<i class="${sceneShipClass(key)} scene-fleet-ship" style="--ship-index:${index}" aria-hidden="true"></i>`
+  ).join("");
+  const overflow = count > visible ? `<b class="scene-fleet-overflow">+${count - visible}</b>` : "";
+  return ships + overflow;
+}
+
+function buildingSceneNode(key, def) {
+  const unlocked = isUnlocked(state, def);
+  const [x, y] = BUILDING_SCENE_POSITIONS[key];
+  const level = state.buildings[key] || 0;
+  const selected = selectedCommandTarget.type === "building" && selectedCommandTarget.key === key;
+  return `<button class="command-node building-node node-${key} ${unlocked ? "" : "locked"} ${selected ? "selected" : ""}" data-scene-building="${key}" style="left:${x}%;top:${y}%" aria-label="${def.name}">
+    <span class="command-node-icon">${def.icon}</span>
+    <span class="command-node-name">${def.name}</span>
+    <span class="command-node-level">${unlocked ? `Lv.${level}` : "LOCK"}</span>
+  </button>`;
+}
+
+function unitSceneNode(key, def) {
+  const unlocked = isUnlocked(state, def);
+  const [x, y] = UNIT_SCENE_POSITIONS[key];
+  const count = state.units[key] || 0;
+  const selected = selectedCommandTarget.type === "unit" && selectedCommandTarget.key === key;
+  return `<button class="command-node unit-node node-unit-${key} ${unlocked ? "" : "locked"} ${selected ? "selected" : ""}" data-scene-unit="${key}" style="left:${x}%;top:${y}%" aria-label="${def.name} ${count}隻">
+    <span class="scene-fleet">${renderFleetCluster(key, count)}</span>
+    <span class="command-node-name">${def.name}</span>
+    <span class="command-node-level">${unlocked ? `${count}隻` : "LOCK"}</span>
+  </button>`;
+}
+
+function renderCommandDetail() {
+  const detail = $("#commandDetail");
+  if (!detail) return;
+
+  if (selectedCommandTarget.type === "unit") {
+    const key = selectedCommandTarget.key;
+    const def = UNITS[key];
     const unlocked = isUnlocked(state, def);
     const count = state.units[key] || 0;
     const cost = unitCost(state, key, 1);
-    return `<article class="unit-card ${unlocked ? "" : "locked"}">
-      <div class="unit-icon">${def.icon}</div><h3>${def.name}</h3><span class="unit-role">${unlocked ? `${def.role} / ${UNITS[def.strongAgainst]?.role || ""}に強い` : `司令Lv${def.unlock?.command}`}</span>
-      <b class="unit-count">${count}</b><span class="unit-power">+${def.power} 戦力/隻</span>
-      ${fleetFormation(key, count)}
-      <button class="recruit-btn" data-unit="${key}" ${!unlocked || !canAffordCost(cost) ? "disabled" : ""}>+1 建造<small>${formatCost(cost)}</small></button>
-    </article>`;
-  }).join("");
+    detail.innerHTML = `<div class="detail-copy">
+      <span class="eyebrow">ARMADA</span>
+      <div class="detail-title"><span class="detail-icon">${def.icon}</span><div><h3>${def.name}</h3><small>${def.role} · 保有 ${count}隻 · 1隻 ${def.power}戦力</small></div></div>
+      <p>${unlocked ? `${UNITS[def.strongAgainst]?.role || ""}タイプに強い艦種。建造するほど基地上の艦影も増えます。` : `司令中枢 Lv${def.unlock?.command} で解禁`}</p>
+    </div>
+    <button class="detail-action recruit-btn" data-recruit-unit="${key}" ${!unlocked || !canAffordCost(cost) ? "disabled" : ""}>+1 建造<small>${formatCost(cost)}</small></button>`;
+    return;
+  }
+
+  const key = selectedCommandTarget.key;
+  const def = BUILDINGS[key];
+  const unlocked = isUnlocked(state, def);
+  const level = state.buildings[key] || 0;
+  const cost = buildingCost(state, key);
+  const rates = productionPerSecond(state);
+  const effect = Object.entries(def.production).length
+    ? Object.keys(def.production).map(resource => `${RESOURCE_META[resource].icon} ${compactNumber(rates[resource])}/秒`).join(" · ")
+    : key === "foundry" ? `全生産 +${level * 18}% / 艦隊補正 +${level * 10}%`
+    : `帝国補正 +${Math.max(0, level - 1) * 5}%`;
+
+  detail.innerHTML = `<div class="detail-copy">
+    <span class="eyebrow">FACILITY</span>
+    <div class="detail-title"><span class="detail-icon">${def.icon}</span><div><h3>${def.name}</h3><small>Lv.${level} · ${unlocked ? effect : `司令中枢 Lv${def.unlock?.command} で解禁`}</small></div></div>
+    <p>${def.description}</p>
+  </div>
+  <button class="detail-action upgrade-btn" data-upgrade-building="${key}" ${!unlocked || !canAffordCost(cost) ? "disabled" : ""}>強化<small>${formatCost(cost)}</small></button>`;
 }
 
+function renderCommandScene() {
+  const mult = productionMultipliers(state);
+  const avg = RESOURCE_KEYS.reduce((sum, key) => sum + mult[key], 0) / RESOURCE_KEYS.length;
+  $("#globalMultiplier").textContent = `総合 ×${avg.toFixed(2)}`;
+  $("#fleetPower").textContent = `戦力 ${compactNumber(fleetPower(state))}`;
+  $("#surgeValue").textContent = `+${30 + state.buildings.command * 2}秒分`;
+
+  const buildingNodes = Object.entries(BUILDINGS).map(([key, def]) => buildingSceneNode(key, def)).join("");
+  const unitNodes = Object.entries(UNITS).map(([key, def]) => unitSceneNode(key, def)).join("");
+  $("#commandScene").innerHTML = buildingNodes + unitNodes;
+  renderCommandDetail();
+}
 function nodeIcon(t) {
   return ({ mining: "⬢", trade: "◈", energy: "⚡", intel: "◆", fortress: "✦", boss: "✹" })[t.type] || "●";
 }
@@ -192,7 +248,7 @@ function renderGoals() {
 }
 
 function renderAll() {
-  renderResources(); renderBuildings(); renderFleet(); renderMap(); renderGoals();
+  renderResources(); renderCommandScene(); renderMap(); renderGoals();
   const unlocks = checkAchievements(state);
   if (unlocks.length) {
     for (const a of unlocks) toast(`実績「${a.name}」解除！ ★${a.reward}`);
@@ -255,6 +311,36 @@ function confirmPrestige() {
   prestigeInProgress = false;
 }
 function handleClick(e) {
+  const sceneBuilding = e.target.closest("[data-scene-building]");
+  if (sceneBuilding) {
+    selectedCommandTarget = { type: "building", key: sceneBuilding.dataset.sceneBuilding };
+    sound("tap"); haptic(8); renderCommandScene();
+    return;
+  }
+
+  const sceneUnit = e.target.closest("[data-scene-unit]");
+  if (sceneUnit) {
+    selectedCommandTarget = { type: "unit", key: sceneUnit.dataset.sceneUnit };
+    sound("tap"); haptic(8); renderCommandScene();
+    return;
+  }
+
+  const upgrade = e.target.closest("[data-upgrade-building]");
+  if (upgrade) {
+    const key = upgrade.dataset.upgradeBuilding;
+    const result = upgradeBuilding(state, key);
+    if (result.ok) { sound("upgrade"); haptic(); burstAt(upgrade, 14); toast(`${BUILDINGS[key].name} Lv.${state.buildings[key]}！`); renderAll(); saveState(); }
+    return;
+  }
+
+  const recruit = e.target.closest("[data-recruit-unit]");
+  if (recruit) {
+    const key = recruit.dataset.recruitUnit;
+    const result = recruitUnit(state, key);
+    if (result.ok) { sound("upgrade"); haptic(12); burstAt(recruit, 10); renderAll(); saveState(); }
+    return;
+  }
+
   const resetConfirm = e.target.closest("[data-reset-confirm]");
   if (resetConfirm) { confirmReset(); return; }
 
@@ -267,19 +353,6 @@ function handleClick(e) {
   const prestigeOpen = e.target.closest("[data-prestige-open]");
   if (prestigeOpen) { openPrestigeModal(); return; }
 
-  const building = e.target.closest("[data-building]");
-  if (building) {
-    const key = building.dataset.building;
-    const result = upgradeBuilding(state, key);
-    if (result.ok) { sound("upgrade"); haptic(); burstAt(building, 14); toast(`${BUILDINGS[key].name} Lv.${state.buildings[key]}！`); renderAll(); }
-    return;
-  }
-  const unit = e.target.closest("[data-unit]");
-  if (unit) {
-    const key = unit.dataset.unit; const result = recruitUnit(state, key);
-    if (result.ok) { sound("upgrade"); haptic(12); burstAt(unit, 9); renderAll(); }
-    return;
-  }
   const mission = e.target.closest("[data-mission]");
   if (mission) {
     const result = claimMission(state, mission.dataset.mission);
@@ -312,7 +385,7 @@ function setupEvents() {
   document.addEventListener("click", handleClick);
   $("#surgeBtn").addEventListener("click", e => {
     const gains = surge(state); sound("upgrade"); haptic(18); burstAt(e.currentTarget, 18);
-    floatGain(`+${compactNumber(Object.values(gains).reduce((a,b)=>a+b,0))}`); renderResources(); renderBuildings(); renderGoals();
+    floatGain(`+${compactNumber(Object.values(gains).reduce((a,b)=>a+b,0))}`); renderResources(); renderCommandScene(); renderGoals();
   });
   $("#soundBtn").addEventListener("click", () => { state.settings.sound = !state.settings.sound; $("#soundBtn").textContent = state.settings.sound ? "🔊" : "🔇"; saveState(); });
   $("#helpBtn").addEventListener("click", () => showModal(`<h2>遊び方</h2><p><strong>1. 基地を強化</strong><br>資源は毎秒自動で増加。資源サージも使って序盤を一気に加速。</p><p><strong>2. 艦隊を編成</strong><br>3兵種には得意分野があり、星域ごとに編成比率で実効戦力が上がります。</p><p><strong>3. 星域を順番に征服</strong><br>後半ほど敵戦力が大きく伸びます。勝率を見ながら艦隊を増強して進軍しましょう。</p><p><strong>4. 超越で周回</strong><br>終盤まで進めると覇王星を獲得してニューゲーム。恒久倍率で次周はさらに高速化。</p><p>進行状況は端末内に自動保存され、最大8時間分のオフライン生産を回収できます。</p><hr class="modal-divider"><h3>データ管理</h3><p>完全に最初から遊び直す場合は、下のボタンからこのゲームのセーブだけを削除できます。</p><button class="danger-btn" data-reset-open>最初からやり直す</button>`));
@@ -338,7 +411,7 @@ function drawFx(){ctx.clearRect(0,0,innerWidth,innerHeight);particles=particles.
 function loop(now) {
   const dt = Math.min(.25, (now - lastFrame) / 1000); lastFrame = now;
   tick(state, dt);
-  if (now - lastRender > 420) { renderResources(); renderBuildings(); renderFleet(); renderMap(); renderGoals(); lastRender = now; }
+  if (now - lastRender > 420) { renderResources(); renderCommandScene(); renderMap(); renderGoals(); lastRender = now; }
   if (now - lastSave > 5000) { saveState(); lastSave = now; }
   requestAnimationFrame(loop);
 }

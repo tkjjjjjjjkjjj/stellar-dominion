@@ -51,6 +51,10 @@ function loadState() {
   return next;
 }
 
+function hasSave() {
+  try { return localStorage.getItem(SAVE_KEY) !== null; } catch { return false; }
+}
+
 function collectOffline(target, seconds) {
   const before = { ...target.resources };
   const result = tick(target, seconds);
@@ -59,8 +63,10 @@ function collectOffline(target, seconds) {
 }
 
 let resetting = false;
+let started = false;
 function saveState() {
-  if (resetting) return;
+  // nothing is written until the player starts, so a first-time visitor who leaves the prologue sees it again
+  if (resetting || !started) return;
   state.lastSeenAt = Date.now();
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch {}
 }
@@ -972,6 +978,7 @@ function setupEvents() {
   $("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
   document.addEventListener("keydown", e => { if (e.key === "Escape") { if (battleResult?.shown) closeBattle(); else closeModal(); } });
   document.addEventListener("visibilitychange", () => {
+    if (!started) return;
     if (document.hidden) { saveState(); clearHold(); return; }
     const sec = (Date.now() - state.lastSeenAt) / 1000;
     if (sec > 3) {
@@ -1021,7 +1028,39 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+// ---------------------------------------------------------------- first-visit prologue
+function showIntro() {
+  $("#introLogo").innerHTML = brandMark();
+  $("#introVoid").innerHTML = planetArt("boss");
+  $("#introFleet").innerHTML = ["guardian", "striker", "striker", "siege", "striker"].map((k, i) => `<span class="intro-ship" style="--i:${i};left:${[30, 12, 44, 4, 22][i]}%;top:${[30, 8, 62, 50, 72][i]}%">${shipArt(k)}</span>`).join("");
+  $("#introSteps").innerHTML = [["base", "基地を育てる"], ["fleet", "艦隊を編成"], ["map", "星域を征服"]]
+    .map(([ico, label]) => `<li>${icon(ico)}<span>${label}</span></li>`).join("");
+  $("#intro").classList.remove("hidden");
+  $("#startBtn").addEventListener("click", startFromIntro, { once: true });
+}
+
+function startFromIntro() {
+  const intro = $("#intro");
+  unlockAudio();
+  sfx("launch"); haptic([20, 40, 30]);
+  state = createInitialState();
+  for (const k of RESOURCE_KEYS) shown[k] = state.resources[k];
+  intro.classList.add("leaving");
+  setTimeout(() => intro.remove(), reducedMotion() ? 0 : 650);
+  beginGame();
+  setTimeout(() => toast("前哨基地に着任しました", { icon: "base", sub: "施設をタップして強化しよう" }), reducedMotion() ? 0 : 500);
+}
+
+function beginGame() {
+  started = true;
+  lastFrame = performance.now();
+  requestAnimationFrame(loop);
+  afterAction();
+  showWelcome();
+}
+
 function boot() {
+  const firstVisit = !hasSave();
   state = loadState();
   prepareWelcome();
   injectDefs();
@@ -1033,13 +1072,12 @@ function boot() {
   buildGoals();
   setupEvents();
   switchPanel("base", true);
-  requestAnimationFrame(loop);
+  if (firstVisit) showIntro();
   const splash = $("#splash");
   setTimeout(() => {
     splash.classList.add("done");
     setTimeout(() => splash.remove(), 600);
-    afterAction();
-    showWelcome();
+    if (!firstVisit) beginGame();
   }, reducedMotion() ? 0 : 450);
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("./sw.js").catch(() => {});
   window.__STELLAR_DOMINION_READY__ = true;

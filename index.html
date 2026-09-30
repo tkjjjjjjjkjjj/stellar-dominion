@@ -21,18 +21,22 @@
     <section id="resources" class="resource-grid" aria-label="資源"></section>
     <main>
       <section id="panel-base" class="panel active">
-        <div class="hero-card glass">
-          <div class="hero-copy"><span class="eyebrow">FRONTIER COMMAND</span><h1>帝国を、<br><em>加速</em>させろ。</h1><p>タップで資源サージ。建設と征服で生産速度を雪だるま式に増やせ。</p><button id="surgeBtn" class="surge-btn"><span class="surge-core">⚡</span><span><b>資源サージ</b><small id="surgeValue">+30秒分</small></span></button></div>
-          <img class="hero-art" src="assets/citadel.svg" alt="宇宙要塞のイラスト" />
+        <div class="section-head command-head">
+          <div><span class="eyebrow">FRONTIER COMMAND</span><h2>司令基地</h2></div>
+          <div class="command-chips"><span id="globalMultiplier" class="pill">総合 ×1.00</span><span id="fleetPower" class="power-chip">戦力 0</span></div>
+        </div>
+        <div class="command-scene glass">
+          <div class="command-stars" aria-hidden="true"></div>
+          <div class="command-orbit orbit-a" aria-hidden="true"></div>
+          <div class="command-orbit orbit-b" aria-hidden="true"></div>
+          <div id="commandScene" class="command-scene-layer" aria-label="司令基地の施設と艦隊"></div>
+          <button id="surgeBtn" class="scene-surge" aria-label="資源サージ">
+            <span class="surge-core">⚡</span>
+            <span><b>資源サージ</b><small id="surgeValue">+30秒分</small></span>
+          </button>
           <div id="floatingLayer" class="floating-layer" aria-hidden="true"></div>
         </div>
-        <div class="section-head"><div><span class="eyebrow">ECONOMY</span><h2>都市建設</h2></div><span id="globalMultiplier" class="pill">×1.00</span></div>
-        <div id="buildingList" class="card-list"></div>
-      </section>
-      <section id="panel-fleet" class="panel">
-        <div class="section-head"><div><span class="eyebrow">ARMADA</span><h2>艦隊編成</h2></div><span id="fleetPower" class="power-chip">戦力 0</span></div>
-        <div class="fleet-banner glass"><img src="assets/fleet.svg" alt="宇宙艦隊のイラスト" /><div><b>兵種相性で実効戦力が変化</b><span>機動 → 火力 → 防衛 → 機動</span></div></div>
-        <div id="unitList" class="unit-grid"></div>
+        <div id="commandDetail" class="command-detail glass" aria-live="polite"></div>
       </section>
       <section id="panel-map" class="panel">
         <div class="section-head"><div><span class="eyebrow">CONQUEST</span><h2>星域征服</h2></div><span id="streakChip" class="pill">連勝 0</span></div>
@@ -50,8 +54,7 @@
       </section>
     </main>
     <nav class="bottom-nav glass" aria-label="メインメニュー">
-      <button class="nav-btn active" data-panel="base"><span>⌂</span><small>基地</small></button>
-      <button class="nav-btn" data-panel="fleet"><span>➤</span><small>艦隊</small></button>
+      <button class="nav-btn active" data-panel="base"><span>⌂</span><small>司令基地</small></button>
       <button class="nav-btn" data-panel="map"><span>◎</span><small>征服</small><i id="mapBadge" class="badge hidden">!</i></button>
       <button class="nav-btn" data-panel="goals"><span>★</span><small>任務</small><i id="goalBadge" class="badge hidden">!</i></button>
     </nav>

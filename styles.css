@@ -807,6 +807,9 @@ body.ascend-flash::after { content: ""; position: fixed; inset: 0; z-index: 95; 
   .planet-node.boss { --pl: min(34vw, 17vh); }
 }
 
+/* Opaque prologue/battle screens cover the base: pause its loops; they resume in place when revealed. */
+.covered :is(.space, .app) *, .covered .app *::before, .covered .app *::after { animation-play-state: paused !important; }
+
 /* ------------------------------------------------------------ reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }

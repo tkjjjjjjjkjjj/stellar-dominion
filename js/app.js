@@ -36,6 +36,7 @@ let detailKey = "";
 let mapKey = "";
 let battleKey = "";
 let busy = false;
+let covered = false;
 let suppressClick = false;
 const hold = Object.fromEntries(RESOURCE_KEYS.map(k => [k, 0]));
 const shown = Object.fromEntries(RESOURCE_KEYS.map(k => [k, 0]));
@@ -778,6 +779,8 @@ function playBattle(id) {
   overlay.className = "battle-overlay phase-in";
   sfx("launch"); haptic([30, 45, 40]);
   const fast = reducedMotion();
+  const current = battleResult;
+  setTimeout(() => { if (battleResult === current) setCovered(true); }, fast ? 0 : 260); // after .bo-bg fades in
   const at = (ms, fn) => battleTimers.push(setTimeout(fn, fast ? 0 : ms));
   if (!fast) {
     at(520, () => overlay.classList.add("phase-fire"));
@@ -846,6 +849,7 @@ function closeBattle() {
   const { result } = battleResult;
   const overlay = $("#battleOverlay");
   const from = $(".reward-list", overlay)?.getBoundingClientRect();
+  setCovered(false);
   overlay.classList.add("closing");
   setTimeout(() => { overlay.className = "battle-overlay hidden"; overlay.innerHTML = ""; }, reducedMotion() ? 0 : 220);
   if (result.win) {
@@ -976,6 +980,17 @@ function syncSoundButton() {
   btn.setAttribute("aria-label", state.settings.sound ? "サウンドをオフ" : "サウンドをオン");
 }
 
+// An opaque prologue/battle screen fully hides the base: freeze its looping art and defer UI refreshes
+// until it is revealed again (the reveal path refreshes immediately, so nothing stale is ever shown).
+function setCovered(on) {
+  covered = on;
+  document.body.classList.toggle("covered", on);
+  if (on) return;
+  // The hidden HUD counters would have settled by now: show the settled values at once.
+  for (const k of RESOURCE_KEYS) shown[k] = Math.max(0, state.resources[k] - hold[k]);
+  updateHud(0);
+}
+
 function syncMotion() { document.body.classList.toggle("reduce-motion", !!state.settings.reducedMotion); }
 
 function setupEvents() {
@@ -1033,8 +1048,10 @@ function loop(now) {
   const dt = Math.min(.25, (now - lastFrame) / 1000);
   lastFrame = now;
   tick(state, dt, viewCache.production(state).rates);
-  updateHud(dt);
-  if (now - lastUi > 250) { refreshActive(); lastUi = now; }
+  if (!covered) {
+    updateHud(dt);
+    if (now - lastUi > 250) { refreshActive(); lastUi = now; }
+  }
   if (now - lastSave > 5000) { saveState(); lastSave = now; }
   requestAnimationFrame(loop);
 }
@@ -1047,6 +1064,7 @@ function showIntro() {
   $("#introSteps").innerHTML = [["base", "基地を育てる"], ["fleet", "艦隊を編成"], ["map", "星域を征服"]]
     .map(([ico, label]) => `<li>${icon(ico)}<span>${label}</span></li>`).join("");
   $("#intro").classList.remove("hidden");
+  setCovered(true);
   $("#startBtn").addEventListener("click", startFromIntro, { once: true });
 }
 
@@ -1056,6 +1074,7 @@ function startFromIntro() {
   sfx("launch"); haptic([20, 40, 30]);
   state = createInitialState();
   for (const k of RESOURCE_KEYS) shown[k] = state.resources[k];
+  setCovered(false);
   intro.classList.add("leaving");
   setTimeout(() => intro.remove(), reducedMotion() ? 0 : 650);
   beginGame();

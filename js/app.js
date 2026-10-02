@@ -1,17 +1,18 @@
 import {
   RESOURCE_KEYS, RESOURCE_META, BUILDINGS, UNITS, TERRITORIES,
-  createInitialState, normalizeState, productionPerSecond, productionMultipliers,
-  buildingCost, unitCost, isUnlocked, upgradeBuilding, recruitUnit, fleetPower,
-  targetTerritory, battlePreview, resolveBattle, enemyPower, enemyScale, ENEMY_SCALE_PER_PRESTIGE, surge, missionList, claimMission,
+  createInitialState, normalizeState,
+  isUnlocked, upgradeBuilding, recruitUnit,
+  targetTerritory, resolveBattle, enemyPower, enemyScale, ENEMY_SCALE_PER_PRESTIGE, surge, missionList, claimMission,
   checkAchievements, availablePrestigeStars, canPrestige, prestige, tick,
   compactNumber
 } from "./game-core.js";
 import { injectDefs, facilityArt, facilityTier, shipArt, planetArt, resourceIcon, starIcon, icon, brandMark } from "./art.js";
 import { sfx, unlockAudio, setSoundEnabled } from "./audio.js";
 import { initFx, burst, burstAt, flyResources } from "./fx.js";
+import { createViewCache } from "./view-cache.js";
 
 const SAVE_KEY = "stellar-dominion-save-v1";
-const APP_VERSION = "1.2.1";
+const APP_VERSION = "1.2.2";
 const OFFLINE_CAP = 8 * 3600;
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -40,6 +41,7 @@ const hold = Object.fromEntries(RESOURCE_KEYS.map(k => [k, 0]));
 const shown = Object.fromEntries(RESOURCE_KEYS.map(k => [k, 0]));
 const fresh = new Set();
 const refs = { res: {}, facilities: {}, fleets: {}, missions: {} };
+const viewCache = createViewCache();
 
 // ---------------------------------------------------------------- state
 function loadState() {
@@ -90,7 +92,7 @@ function formatClock(sec) {
 }
 
 function etaFor(cost) {
-  const rates = productionPerSecond(state);
+  const { rates } = viewCache.production(state);
   let worst = 0;
   for (const [k, v] of Object.entries(cost)) {
     const lack = v - state.resources[k];
@@ -158,12 +160,11 @@ function updateHud(dt) {
 }
 
 function updateHudSlow() {
-  const rates = productionPerSecond(state);
+  const { rates, multipliers: mult } = viewCache.production(state);
   for (const key of RESOURCE_KEYS) setText(refs.res[key].rate, `+${compactNumber(rates[key])}/秒`);
-  const mult = productionMultipliers(state);
   const avg = RESOURCE_KEYS.reduce((sum, key) => sum + mult[key], 0) / RESOURCE_KEYS.length;
   setText(refs.multVal, `×${avg.toFixed(2)}`);
-  setText(refs.powerVal, fmtInt(fleetPower(state)));
+  setText(refs.powerVal, fmtInt(viewCache.power(state)));
   setText(refs.cmdLevel, String(state.buildings.command));
   setText(refs.starCount, String(state.prestige.stars));
 }
@@ -227,7 +228,7 @@ function updateBaseScene() {
     setHTML(r.lv, unlocked ? (level ? `Lv.${level}` : "未建設") : `${icon("lock")}Lv.${def.unlock.command}`);
     setClass(r.el, "locked", !unlocked);
     setClass(r.el, "selected", selected.type === "building" && selected.key === key);
-    setClass(r.el, "can-up", unlocked && affordable(buildingCost(state, key)));
+    setClass(r.el, "can-up", unlocked && affordable(viewCache.buildingCost(state, key)));
     setClass(r.el, "fresh", fresh.has(key));
     if (r.conduit) setClass(r.conduit, "live", level > 0);
   }
@@ -248,7 +249,7 @@ function updateBaseScene() {
     setHTML(r.count, unlocked ? `×${count}` : `${icon("lock")}Lv.${def.unlock.command}`);
     setClass(r.el, "locked", !unlocked);
     setClass(r.el, "selected", selected.type === "unit" && selected.key === key);
-    setClass(r.el, "can-up", unlocked && affordable(unitCost(state, key)));
+    setClass(r.el, "can-up", unlocked && affordable(viewCache.unitCost(state, key)));
     setClass(r.el, "fresh", fresh.has(key));
   }
   setText($("#surgeValue"), `+${28 + state.buildings.command * 2}秒分`);
@@ -260,12 +261,8 @@ function nextUnlockText(level) {
   return items.length ? `次のLvで ${items.join("・")} 解禁` : "";
 }
 
-function facilityEffect(key, level) {
+function facilityEffect(key, level, { now, next }) {
   const def = BUILDINGS[key];
-  const now = productionPerSecond(state);
-  const sim = structuredClone(state);
-  sim.buildings[key] = level + 1;
-  const next = productionPerSecond(sim);
   const produced = Object.keys(def.production);
   if (produced.length) {
     return produced.map(r => `${resourceIcon(r)}<span>${compactNumber(now[r])}/秒</span><i>${icon("up")}</i><em>${compactNumber(next[r])}/秒</em>`).join("");
@@ -308,7 +305,8 @@ function renderDetail() {
     refs.detail.btn = $(".action-btn", sheet);
     refs.detail.artHolder = $(".detail-facility", sheet);
     refs.detail.artSig = "";
-    refs.detail.costSig = "";
+    refs.detail.cost = null;
+    refs.detail.effectSource = null;
   }
   updateDetail();
 }
@@ -320,16 +318,18 @@ function updateDetail() {
   const key = selected.key;
   const def = isUnit ? UNITS[key] : BUILDINGS[key];
   const unlocked = isUnlocked(state, def);
-  const cost = isUnit ? unitCost(state, key) : buildingCost(state, key);
+  const cost = isUnit ? viewCache.unitCost(state, key) : viewCache.buildingCost(state, key);
   const can = unlocked && affordable(cost);
 
   if (isUnit) {
     const count = state.units[key] || 0;
     setText(d.kicker, `FLEET · ${def.role}`);
     setText(d.level, `×${count}`);
-    const sim = structuredClone(state); sim.units[key] += 1;
-    const html = `${icon("power")}<span>総戦力 ${fmtInt(fleetPower(state))}</span><i>${icon("up")}</i><em>${fmtInt(fleetPower(sim))}</em>`;
-    setHTML(d.effect, html);
+    const effect = viewCache.unitEffect(state, key);
+    if (d.effectSource !== effect) {
+      setHTML(d.effect, `${icon("power")}<span>総戦力 ${fmtInt(effect.own)}</span><i>${icon("up")}</i><em>${fmtInt(effect.next)}</em>`);
+      d.effectSource = effect;
+    }
   } else {
     const level = state.buildings[key] || 0;
     const tier = facilityTier(level);
@@ -337,12 +337,16 @@ function updateDetail() {
     setText(d.level, `Lv.${level}`);
     const artSig = `${unlocked}:${tier}`;
     if (d.artSig !== artSig) { d.artHolder.innerHTML = facilityArt(key, level, !unlocked); d.artSig = artSig; }
-    const html = unlocked ? facilityEffect(key, level) + (key === "command" && nextUnlockText(level) ? `<b class="unlock-hint">${nextUnlockText(level)}</b>` : "") : `${icon("lock")}<span>司令中枢 Lv.${def.unlock.command} で解禁</span>`;
-    setHTML(d.effect, html);
+    const effect = unlocked ? viewCache.facilityEffect(state, key) : false;
+    if (d.effectSource !== effect) {
+      const hint = key === "command" ? nextUnlockText(level) : "";
+      const html = unlocked ? facilityEffect(key, level, effect) + (hint ? `<b class="unlock-hint">${hint}</b>` : "") : `${icon("lock")}<span>司令中枢 Lv.${def.unlock.command} で解禁</span>`;
+      setHTML(d.effect, html);
+      d.effectSource = effect;
+    }
   }
 
-  const costSig = JSON.stringify(cost);
-  if (d.costSig !== costSig) { d.costs.innerHTML = costChips(cost); d.costSig = costSig; }
+  if (d.cost !== cost) { d.costs.innerHTML = costChips(cost); d.cost = cost; }
   for (const chip of d.costs.children) setClass(chip, "lack", state.resources[chip.dataset.cost] < cost[chip.dataset.cost]);
 
   const level = state.buildings[key] || 0;
@@ -355,7 +359,8 @@ function updateDetail() {
   setClass(d.btn, "btn-green", can);
   setClass(d.btn, "btn-wait", unlocked && !can);
   setClass(d.btn, "btn-locked", !unlocked);
-  d.btn.setAttribute("aria-disabled", String(!can));
+  const disabled = String(!can);
+  if (d.btn.getAttribute("aria-disabled") !== disabled) d.btn.setAttribute("aria-disabled", disabled);
 }
 
 // ---------------------------------------------------------------- map
@@ -441,12 +446,14 @@ function renderBattleCard(target) {
     refs.battle = Object.fromEntries($$("[data-b]", card).map(el => [el.dataset.b, el]));
   }
   if (!refs.battle) return;
-  const preview = battlePreview(state, target);
+  const preview = viewCache.preview(state, target);
+  if (refs.battle.preview === preview) return;
+  refs.battle.preview = preview;
   const pct = Math.round(preview.winChance * 100);
   setText(refs.battle.pct, `${pct}%`);
   setText(refs.battle.own, fmtInt(preview.effective));
   const tone = pct < 40 ? "bad" : pct < 65 ? "mid" : "good";
-  refs.battle.odds.dataset.tone = tone;
+  if (refs.battle.odds.dataset.tone !== tone) refs.battle.odds.dataset.tone = tone;
   refs.battle.ring.style.strokeDashoffset = String(169.6 * (1 - preview.winChance));
   refs.battle.bar.style.width = `${Math.max(6, Math.min(94, preview.effective / (preview.effective + preview.enemy) * 100))}%`;
 }
@@ -492,7 +499,7 @@ function updateGoals() {
     const claimed = state.missionClaims.includes(m.id);
     const done = m.progress >= m.goal;
     const p = Math.min(100, m.progress / m.goal * 100);
-    r.bar.style.transform = `scaleX(${p / 100})`;
+    if (r.progress !== p) { r.bar.style.transform = `scaleX(${p / 100})`; r.progress = p; }
     setText(r.prog, `${fmtInt(Math.min(m.goal, Math.floor(m.progress)))} / ${fmtInt(m.goal)}`);
     setText(r.label, claimed ? "受取済" : done ? "受け取る" : `${Math.floor(p)}%`);
     setClass(r.el, "ready", done && !claimed);
@@ -516,7 +523,7 @@ function updateBadges() {
   const claimable = missionList(state).some(m => m.progress >= m.goal && !state.missionClaims.includes(m.id)) || canPrestige(state);
   setClass($("#goalBadge"), "hidden", !claimable);
   const target = targetTerritory(state);
-  const odds = target ? battlePreview(state, target).winChance : 0;
+  const odds = target ? viewCache.preview(state, target).winChance : 0;
   setClass($("#mapBadge"), "hidden", !target || odds * 100 < 57.5);
 }
 
@@ -1025,7 +1032,7 @@ let lastSave = 0;
 function loop(now) {
   const dt = Math.min(.25, (now - lastFrame) / 1000);
   lastFrame = now;
-  tick(state, dt);
+  tick(state, dt, viewCache.production(state).rates);
   updateHud(dt);
   if (now - lastUi > 250) { refreshActive(); lastUi = now; }
   if (now - lastSave > 5000) { saveState(); lastSave = now; }

@@ -250,9 +250,8 @@ export function productionPerSecond(state) {
   return Object.fromEntries(RESOURCE_KEYS.map(k => [k, raw[k] * mult[k] * PRODUCTION_RATE_SCALE]));
 }
 
-export function tick(state, seconds) {
+export function tick(state, seconds, rates = productionPerSecond(state)) {
   const dt = Math.max(0, Math.min(seconds, MAX_TICK_SECONDS));
-  const rates = productionPerSecond(state);
   const produced = grantResources(state, scaleResources(rates, dt));
   state.lifetime.totalProduced += produced;
   return { rates, produced, seconds: dt };

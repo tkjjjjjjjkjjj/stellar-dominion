@@ -1,9 +1,9 @@
 // Network-first: online players always get the latest deploy (revalidated past the HTTP cache),
 // the cache is only a fallback so the game still starts offline.
-const CACHE = "stellar-dominion-v10";
+const CACHE = "stellar-dominion-v11";
 const ASSETS = [
   "./", "./index.html", "./styles.css", "./manifest.webmanifest",
-  "./js/app.js", "./js/game-core.js", "./js/art.js", "./js/audio.js", "./js/fx.js",
+  "./js/app.js", "./js/game-core.js", "./js/art.js", "./js/audio.js", "./js/fx.js", "./js/view-cache.js",
   "./assets/icon.svg", "./assets/icon-180.png", "./assets/icon-192.png", "./assets/icon-512.png",
   "./assets/fonts/chakra-petch-600.woff2", "./assets/fonts/chakra-petch-700.woff2", "./assets/fonts/mplus1-800-subset.woff2",
 ];

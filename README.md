@@ -26,6 +26,7 @@ GitHub Pagesだけで動く、スマホ向けインクリメンタル・スト�
 | --- | --- |
 | `js/game-core.js` | ゲームロジック（バランス・ルール） |
 | `js/app.js` | UI・入力・演出 |
+| `js/view-cache.js` | 生産・戦力・コスト・次回強化の試算を依存値が変わるまで再利用 |
 | `js/art.js` | 施設・艦船・惑星・アイコンの手続き的SVGアート |
 | `js/fx.js` | パーティクルと資源フライ演出 |
 | `js/audio.js` | 合成効果音 |
@@ -41,6 +42,8 @@ node tools/build-fonts.mjs
 ```bash
 npm test
 ```
+
+軽量化の方針と品質確認の手順は [docs/performance-plan.md](docs/performance-plan.md) にまとめています。生産計算とUI試算をキャッシュし、通常のフレームレートと演出を維持します。
 
 ## GitHub Pages
 `.github/workflows/pages.yml` を同梱しています。Repository Settings → Pages → Source を `GitHub Actions` にすると、mainへのpushで自動デプロイされます。

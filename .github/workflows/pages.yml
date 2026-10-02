@@ -25,6 +25,7 @@ jobs:
         run: |
           node --check js/app.js
           node --check js/game-core.js
+          node --check js/view-cache.js
           node --check js/art.js
           node --check js/fx.js
           node --check js/audio.js
